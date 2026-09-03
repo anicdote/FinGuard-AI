@@ -39,8 +39,9 @@ class TransactionRepository:
     ) -> List[dict]:
         """Return transactions involving an account as origin or destination.
 
-        Time bounds are inclusive. ``exclude_transaction_id`` follows the
-        repository's existing MongoDB ``_id`` convention.
+        Time bounds are inclusive. ``exclude_transaction_id`` supports the
+        repository's MongoDB ``_id`` convention and legacy string ``id``
+        transaction identifiers.
         """
         query = {
             "$or": [
@@ -58,7 +59,18 @@ class TransactionRepository:
             query["timestamp"] = timestamp_query
 
         if exclude_transaction_id:
-            query["_id"] = {"$ne": ObjectId(exclude_transaction_id)}
+            # New transactions use Mongo ObjectIds.  Some imported/legacy
+            # transaction records instead carry their string identifier in
+            # ``id`` (and may also use it as ``_id``).  Do not coerce arbitrary
+            # strings through ObjectId: values such as TXN-... are valid IDs in
+            # that representation, but are not valid BSON ObjectIds.
+            if ObjectId.is_valid(exclude_transaction_id):
+                query["_id"] = {"$ne": ObjectId(exclude_transaction_id)}
+            else:
+                query["$and"] = [
+                    {"_id": {"$ne": exclude_transaction_id}},
+                    {"id": {"$ne": exclude_transaction_id}},
+                ]
 
         cursor = self.col.find(query).sort([
             ("timestamp", -1),

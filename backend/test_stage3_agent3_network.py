@@ -1,6 +1,7 @@
 """Focused deterministic tests for Agent 3 network investigation."""
 
 import asyncio
+import copy
 import sys
 from datetime import datetime, timezone
 
@@ -65,7 +66,7 @@ async def cyclic_graph_test():
     assert network["evidence"]["suspicious_transaction_ratio"] == 0.5
     assert first.network == second.network and first.sub_cases == second.sub_cases
     assert all(case["account_id"] != "A" for case in first.sub_cases)
-    assert {case["account_id"] for case in first.sub_cases} == {"D"}
+    assert {case["account_id"] for case in first.sub_cases} == {"B", "D"}
     assert all("Confirmed" not in case["reason"] for case in first.sub_cases)
     assert all(call[4] == "focal" and call[3] == 100 for call in repo.calls)
 
@@ -83,6 +84,27 @@ async def no_history_and_no_cycle_test():
     assert empty.network["node_count"] == 2 and empty.network["edge_count"] == 1
 
 
+async def labels_do_not_change_network_risk_test():
+    focal = {"_id": "focal-labels", "account_id": "A", "counterpartyAccount": "B",
+             "amount": 10, "timestamp": at(10), "channel": "UPI", "paySimType": "TRANSFER"}
+    behavior = [
+        {"_id": "bd", "account_id": "B", "counterpartyAccount": "D", "amount": 30, "timestamp": at(9), "channel": "UPI"},
+        {"_id": "db", "account_id": "D", "counterpartyAccount": "B", "amount": 40, "timestamp": at(8), "channel": "RTGS"},
+    ]
+    labelled = copy.deepcopy(behavior)
+    labelled[0]["is_fraud"] = True
+    labelled[1]["fraud_label"] = "SUSPICIOUS"
+    baseline = await Agent3Network(FixedTransactionRepository(behavior)).run(InvestigationContext("focal-labels", focal))
+    changed = await Agent3Network(FixedTransactionRepository(labelled)).run(InvestigationContext("focal-labels", focal))
+    assert {n["account_id"]: n["risk_score"] for n in baseline.network["nodes"]} == {
+        n["account_id"]: n["risk_score"] for n in changed.network["nodes"]
+    }
+    assert baseline.sub_cases == changed.sub_cases
+    assert baseline.network["evidence"]["provisional_network_risk_score"] == changed.network["evidence"]["provisional_network_risk_score"]
+    assert baseline.network["evidence"]["suspicious_transaction_count"] == 0
+    assert changed.network["evidence"]["suspicious_transaction_count"] == 2
+
+
 def suspicious_value_and_legacy_removal_test():
     assert Agent3Network._is_suspicious({"is_fraud": True})
     assert Agent3Network._is_suspicious({"is_fraud": 1})
@@ -98,6 +120,7 @@ async def main():
     suspicious_value_and_legacy_removal_test()
     await cyclic_graph_test()
     await no_history_and_no_cycle_test()
+    await labels_do_not_change_network_risk_test()
     print("Stage 3 Agent 3 network tests passed.")
 
 

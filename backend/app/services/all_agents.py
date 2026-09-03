@@ -186,8 +186,15 @@ class Agent3Network:
         accounts = sorted({e[key] for e in edges for key in ("from", "to")})
         metrics = self._metrics(accounts, edges, records)
         ranks = self._pagerank(accounts, edges)
+        max_transactions = max((m["transaction_count"] for m in metrics.values()), default=0)
+        max_degree = max((m["in_degree"] + m["out_degree"] for m in metrics.values()), default=0)
+        max_volume = max((m["total_inflow"] + m["total_outflow"] for m in metrics.values()), default=0.0)
+        max_pagerank = max(ranks.values(), default=0.0)
         primary = str(focal.get("account_id", ""))
-        nodes = [self._node(a, metrics[a], a == primary, ranks[a]) for a in accounts]
+        nodes = [self._node(
+            a, metrics[a], a == primary, ranks[a], max_transactions,
+            max_degree, max_volume, max_pagerank,
+        ) for a in accounts]
         return nodes, edges, self._evidence(edges, records, metrics, primary, ranks)
 
     def _metrics(self, accounts, edges, records):
@@ -203,6 +210,12 @@ class Agent3Network:
             for account in {source, destination}:
                 result[account]["transaction_count"] += 1
                 result[account]["suspicious_transaction_count"] += int(suspicious)
+        pairs = {(edge["from"], edge["to"]) for edge in edges}
+        for account in accounts:
+            result[account]["reciprocal_relationship_count"] = sum(
+                1 for source, destination in pairs
+                if source == account and source != destination and (destination, source) in pairs
+            )
         return result
 
     def _pagerank(self, accounts, edges):
@@ -227,9 +240,19 @@ class Agent3Network:
             ranks = next_ranks
         return ranks
 
-    def _node(self, account, metric, is_primary, pagerank):
-        # Account risk intentionally remains a reviewable observed-label ratio.
-        risk = round(metric["suspicious_transaction_count"] / metric["transaction_count"], 4) if metric["transaction_count"] else 0.0
+    def _node(self, account, metric, is_primary, pagerank, max_transactions,
+              max_degree, max_volume, max_pagerank):
+        """Score observable account behavior; labels remain diagnostic evidence only."""
+        activity = metric["transaction_count"] / max_transactions if max_transactions else 0.0
+        connectivity = (metric["in_degree"] + metric["out_degree"]) / max_degree if max_degree else 0.0
+        volume = (metric["total_inflow"] + metric["total_outflow"]) / max_volume if max_volume else 0.0
+        centrality = pagerank / max_pagerank if max_pagerank else 0.0
+        reciprocal = float(metric["reciprocal_relationship_count"] > 0)
+        # Emphasize bidirectional movement, then normalize observed activity,
+        # connectivity, transaction value, and graph centrality within this
+        # bounded one-hop network.  Every component is in [0, 1].
+        risk = round(min(1.0, .50 * reciprocal + .15 * activity + .10 * connectivity +
+                             .15 * volume + .10 * centrality), 4)
         level = "critical" if risk >= .85 else "high" if risk >= .65 else "medium" if risk >= .4 else "low"
         return {"account_id": account, "risk_score": risk, "risk_level": level,
                 "is_primary": is_primary, "pagerank": round(pagerank, 8),
@@ -238,6 +261,7 @@ class Agent3Network:
                 "weighted_degree": round(metric["total_inflow"] + metric["total_outflow"], 4),
                 "transaction_count": metric["transaction_count"],
                 "suspicious_transaction_count": metric["suspicious_transaction_count"],
+                "reciprocal_relationship_count": metric["reciprocal_relationship_count"],
                 "total_inflow": round(metric["total_inflow"], 4), "total_outflow": round(metric["total_outflow"], 4)}
 
     def _find_clusters(self, nodes, edges):
@@ -279,17 +303,23 @@ class Agent3Network:
                 "distinct_counterparty_count": len(counterparties), "activity_concentration": round(concentration, 4),
                 "reciprocal_relationship_count": sum(1 for a, b in pairs if a < b and (b, a) in pairs),
                 "primary_network_degree": metrics.get(primary, {}).get("in_degree", 0) + metrics.get(primary, {}).get("out_degree", 0),
-                "primary_pagerank": round(ranks.get(primary, 0.0), 8)}
+                "max_network_degree": max((m["in_degree"] + m["out_degree"] for m in metrics.values()), default=0),
+                "primary_pagerank": round(ranks.get(primary, 0.0), 8),
+                "max_pagerank": round(max(ranks.values(), default=0.0), 8)}
 
     @staticmethod
     def _provisional_network_risk(evidence):
-        return round(min(1.0, .7 * evidence["suspicious_transaction_ratio"] + .2 * evidence["activity_concentration"] + .1 * int(evidence["reciprocal_relationship_count"] > 0)), 4)
+        degree = evidence["primary_network_degree"] / evidence["max_network_degree"] if evidence["max_network_degree"] else 0.0
+        centrality = evidence["primary_pagerank"] / evidence["max_pagerank"] if evidence["max_pagerank"] else 0.0
+        return round(min(1.0, .45 * evidence["activity_concentration"] +
+                         .30 * int(evidence["reciprocal_relationship_count"] > 0) +
+                         .15 * degree + .10 * centrality), 4)
 
     def _sub_cases(self, nodes, primary):
         candidates = [n for n in nodes if n["account_id"] != primary and n["risk_score"] >= SUBCASES_THRESHOLD]
         candidates.sort(key=lambda n: (-n["risk_score"], -n["pagerank"], n["account_id"]))
         return [{"account_id": n["account_id"], "risk_score": n["risk_score"], "risk_level": n["risk_level"],
-                 "reason": f"Observed suspicious share {n['risk_score']:.2f} across {n['transaction_count']} observed transaction(s)", "auto_created": True} for n in candidates[:MAX_SUBCASES]]
+                 "reason": f"Elevated observed network behavior score {n['risk_score']:.2f} across {n['transaction_count']} transaction(s)", "auto_created": True} for n in candidates[:MAX_SUBCASES]]
 
     @staticmethod
     def _is_suspicious(transaction):
