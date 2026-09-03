@@ -6,9 +6,8 @@ Import: from app.services.all_agents import Agent1Anomaly, Agent2Evidence, etc.
 """
 
 import logging
-import random
-from datetime import datetime, timezone
-from typing import Dict, List, Any
+from datetime import datetime, timezone, timedelta
+from typing import Dict, List
 
 from app.services.investigation_context import InvestigationContext
 from app.services.fraud_prediction import fraud_service
@@ -124,94 +123,193 @@ SUBCASES_THRESHOLD    = 0.70
 
 
 class Agent3Network:
+    """Bounded, deterministic one-hop network analysis backed by transactions."""
+    LOOKBACK_DAYS = 30
+    HISTORY_LIMIT_PER_ENDPOINT = 100
+    MAX_HISTORY_TRANSACTIONS = 200
+
+    def __init__(self, transaction_repository=None):
+        self.transaction_repository = transaction_repository
+
     async def run(self, ctx: InvestigationContext) -> InvestigationContext:
-        logger.info(f"[Agent3] Network investigation for {ctx.transaction_id}")
-        txn = ctx.transaction
-
-        nodes, edges = self._build_graph(txn, ctx.fraud_probability)
-
-        sub_cases = []
-        primary_id = txn.get("accountId", txn.get("id", ""))
-        for node in nodes:
-            if node["account_id"] == primary_id:
-                continue
-            if node["risk_score"] >= SUBCASES_THRESHOLD and \
-               len(sub_cases) < MAX_SUBCASES:
-                sub_cases.append({
-                    "account_id":   node["account_id"],
-                    "risk_score":   node["risk_score"],
-                    "risk_level":   node["risk_level"],
-                    "reason":       f"Connected account — risk {node['risk_score']:.2f}",
-                    "auto_created": True,
-                })
-
-        scc = self._find_clusters(nodes, edges)
+        history = await self._history(ctx.transaction, ctx.transaction_id)
+        nodes, edges, evidence = self._graph(ctx.transaction, history)
+        clusters = self._find_clusters(nodes, edges)
+        evidence["strongly_connected_components"] = {
+            "count": len(clusters),
+            "cyclic_component_count": sum(c["node_count"] > 1 for c in clusters),
+            "largest_component_size": max((c["node_count"] for c in clusters), default=0),
+        }
+        evidence["provisional_network_risk_score"] = self._provisional_network_risk(evidence)
+        primary = str(ctx.transaction.get("account_id", ""))
+        sub_cases = self._sub_cases(nodes, primary)
+        central = max(nodes, key=lambda n: (n["pagerank"], n["account_id"]), default={})
         network = {
-            "node_count":   len(nodes),
-            "edge_count":   len(edges),
-            "nodes":        nodes,
-            "edges":        edges,
-            "scc_clusters": scc,
-            "max_pagerank": max((n["pagerank"] for n in nodes), default=0),
-            "central_node": max(nodes, key=lambda n: n["pagerank"],
-                                default={}).get("account_id", ""),
+            "node_count": len(nodes), "edge_count": len(edges), "nodes": nodes,
+            "edges": edges, "scc_clusters": clusters,
+            "max_pagerank": max((n["pagerank"] for n in nodes), default=0.0),
+            "central_node": central.get("account_id", ""), "evidence": evidence,
         }
         ctx.set_network(network, sub_cases)
-        logger.info(f"[Agent3] nodes={len(nodes)} sub_cases={len(sub_cases)}")
         return ctx
 
-    def _build_graph(self, txn: dict, base_risk: float):
-        primary_id   = txn.get("accountId", txn.get("id", "ACC-PRIMARY"))
-        counterparty = txn.get("counterparty", txn.get("nameDest", "ACC-DEST"))
-        channel      = txn.get("channel", "NEFT")
-        amount       = float(txn.get("amount", 0))
+    async def _history(self, focal: dict, transaction_id: str) -> List[dict]:
+        """Read only the focal endpoints, in the inclusive prior 30-day window."""
+        end = self._timestamp(focal.get("timestamp"))
+        if not self.transaction_repository or not end:
+            return []
+        focal_id, records = str(focal.get("_id", transaction_id or "")), {}
+        endpoints = sorted({str(v) for v in (focal.get("account_id"), focal.get("counterpartyAccount")) if v})
+        for account in endpoints:
+            found = await self.transaction_repository.get_by_account_roles(
+                account, start=end - timedelta(days=self.LOOKBACK_DAYS), end=end,
+                limit=self.HISTORY_LIMIT_PER_ENDPOINT, exclude_transaction_id=focal_id or None,
+            )
+            for item in found:
+                item_id = str(item.get("_id", ""))
+                if item_id and item_id != focal_id:
+                    records[item_id] = item
+        result = list(records.values())
+        result.sort(key=lambda x: (self._timestamp(x.get("timestamp")) or datetime.min.replace(tzinfo=timezone.utc), str(x.get("_id", ""))))
+        return result[:self.MAX_HISTORY_TRANSACTIONS]
 
-        nodes = [
-            self._node(primary_id,   base_risk,        True),
-            self._node(counterparty, base_risk * 0.85),
-        ]
-        edges = [{"from": primary_id, "to": counterparty,
-                  "amount": amount, "channel": channel}]
+    def _graph(self, focal: dict, history: List[dict]):
+        records, edges = [focal] + history, []
+        for item in records:
+            source, destination = item.get("account_id"), item.get("counterpartyAccount")
+            if source and destination:
+                edges.append({"from": str(source), "to": str(destination),
+                              "amount": float(item.get("amount") or 0.0),
+                              "timestamp": item.get("timestamp"), "channel": item.get("channel"),
+                              "transaction_id": str(item.get("_id", ""))})
+        edges.sort(key=lambda e: (self._timestamp(e["timestamp"]) or datetime.min.replace(tzinfo=timezone.utc), e["transaction_id"], e["from"], e["to"]))
+        accounts = sorted({e[key] for e in edges for key in ("from", "to")})
+        metrics = self._metrics(accounts, edges, records)
+        ranks = self._pagerank(accounts, edges)
+        primary = str(focal.get("account_id", ""))
+        nodes = [self._node(a, metrics[a], a == primary, ranks[a]) for a in accounts]
+        return nodes, edges, self._evidence(edges, records, metrics, primary, ranks)
 
-        if base_risk >= 0.5:
-            for i in range(random.randint(2, 6)):
-                acc  = f"ACC-{random.randint(1000,9999)}"
-                risk = round(base_risk * random.uniform(0.5, 0.95), 3)
-                nodes.append(self._node(acc, risk))
-                edges.append({"from": counterparty, "to": acc,
-                              "amount": round(amount * random.uniform(0.1, 0.5)),
-                              "channel": random.choice(["UPI","NEFT","IMPS"])})
+    def _metrics(self, accounts, edges, records):
+        result = {a: {"in_degree": 0, "out_degree": 0, "total_inflow": 0.0,
+                      "total_outflow": 0.0, "transaction_count": 0,
+                      "suspicious_transaction_count": 0} for a in accounts}
+        by_id = {str(item.get("_id", "")): item for item in records}
+        for edge in edges:
+            source, destination, amount = edge["from"], edge["to"], edge["amount"]
+            result[source]["out_degree"] += 1; result[source]["total_outflow"] += amount
+            result[destination]["in_degree"] += 1; result[destination]["total_inflow"] += amount
+            suspicious = self._is_suspicious(by_id.get(edge["transaction_id"], {}))
+            for account in {source, destination}:
+                result[account]["transaction_count"] += 1
+                result[account]["suspicious_transaction_count"] += int(suspicious)
+        return result
 
-        pr = {n["account_id"]: 1.0 / len(nodes) for n in nodes}
-        for _ in range(5):
-            new_pr = {}
-            for node in nodes:
-                acc = node["account_id"]
-                in_e = [e for e in edges if e["to"] == acc]
-                new_pr[acc] = 0.15 / len(nodes) + 0.85 * sum(
-                    pr.get(e["from"], 0) /
-                    max(sum(1 for ee in edges if ee["from"] == e["from"]), 1)
-                    for e in in_e)
-            pr = new_pr
-        for node in nodes:
-            node["pagerank"] = round(pr.get(node["account_id"], 0), 4)
-        return nodes, edges
+    def _pagerank(self, accounts, edges):
+        if not accounts: return {}
+        count, damping = len(accounts), 0.85
+        outgoing = {a: [] for a in accounts}
+        for edge in edges: outgoing[edge["from"]].append(edge)
+        ranks = {a: 1.0 / count for a in accounts}
+        for _ in range(100):
+            dangling = sum(ranks[a] for a in accounts if not outgoing[a]) / count
+            next_ranks = {}
+            for account in accounts:
+                inbound = 0.0
+                for edge in (e for e in edges if e["to"] == account):
+                    source_edges = outgoing[edge["from"]]
+                    total = sum(max(e["amount"], 0.0) for e in source_edges)
+                    share = edge["amount"] / total if total else 1.0 / len(source_edges)
+                    inbound += ranks[edge["from"]] * share
+                next_ranks[account] = (1 - damping) / count + damping * (inbound + dangling)
+            if max(abs(next_ranks[a] - ranks[a]) for a in accounts) < 1e-12:
+                return next_ranks
+            ranks = next_ranks
+        return ranks
 
-    def _node(self, acc_id: str, risk: float, primary=False) -> dict:
-        risk  = round(min(max(risk, 0.0), 1.0), 3)
-        level = ("critical" if risk >= 0.85 else "high" if risk >= 0.65
-                 else "medium" if risk >= 0.40 else "low")
-        return {"account_id": acc_id, "risk_score": risk,
-                "risk_level": level, "is_primary": primary, "pagerank": 0.0}
+    def _node(self, account, metric, is_primary, pagerank):
+        # Account risk intentionally remains a reviewable observed-label ratio.
+        risk = round(metric["suspicious_transaction_count"] / metric["transaction_count"], 4) if metric["transaction_count"] else 0.0
+        level = "critical" if risk >= .85 else "high" if risk >= .65 else "medium" if risk >= .4 else "low"
+        return {"account_id": account, "risk_score": risk, "risk_level": level,
+                "is_primary": is_primary, "pagerank": round(pagerank, 8),
+                "degree": metric["in_degree"] + metric["out_degree"],
+                "in_degree": metric["in_degree"], "out_degree": metric["out_degree"],
+                "weighted_degree": round(metric["total_inflow"] + metric["total_outflow"], 4),
+                "transaction_count": metric["transaction_count"],
+                "suspicious_transaction_count": metric["suspicious_transaction_count"],
+                "total_inflow": round(metric["total_inflow"], 4), "total_outflow": round(metric["total_outflow"], 4)}
 
-    def _find_clusters(self, nodes, edges) -> List[Dict]:
-        if not nodes: return []
-        return [{"cluster_id": "SCC-1", "node_count": len(nodes),
-                 "account_ids": [n["account_id"] for n in nodes],
-                 "avg_risk": round(sum(n["risk_score"] for n in nodes)/len(nodes), 3)}]
+    def _find_clusters(self, nodes, edges):
+        graph = {n["account_id"]: [] for n in nodes}; reverse = {n["account_id"]: [] for n in nodes}
+        for edge in edges: graph[edge["from"]].append(edge["to"]); reverse[edge["to"]].append(edge["from"])
+        visited, order = set(), []
+        def visit(a):
+            visited.add(a)
+            for b in sorted(graph[a]):
+                if b not in visited: visit(b)
+            order.append(a)
+        for a in sorted(graph):
+            if a not in visited: visit(a)
+        risks, components = {n["account_id"]: n["risk_score"] for n in nodes}, []
+        visited.clear()
+        def collect(a, component):
+            visited.add(a); component.append(a)
+            for b in sorted(reverse[a]):
+                if b not in visited: collect(b, component)
+        for a in reversed(order):
+            if a not in visited:
+                component = []; collect(a, component); components.append(sorted(component))
+        components.sort(key=lambda c: c[0])
+        return [{"cluster_id": f"SCC-{i}", "node_count": len(c), "account_ids": c,
+                 "avg_risk": round(sum(risks[a] for a in c) / len(c), 4)} for i, c in enumerate(components, 1)]
 
+    def _evidence(self, edges, records, metrics, primary, ranks):
+        count = len(edges)
+        suspicious = sum(
+            self._is_suspicious(item)
+            for item in records
+            if item.get("account_id") and item.get("counterpartyAccount")
+        )
+        pairs = {(e["from"], e["to"]) for e in edges}
+        counterparties = {e["to"] for e in edges if e["from"] == primary} | {e["from"] for e in edges if e["to"] == primary}
+        concentration = max((m["transaction_count"] for m in metrics.values()), default=0) / (2 * count) if count else 0.0
+        return {"transaction_count": count, "total_network_transaction_volume": round(sum(e["amount"] for e in edges), 4),
+                "suspicious_transaction_count": suspicious, "suspicious_transaction_ratio": round(suspicious / count, 4) if count else 0.0,
+                "distinct_counterparty_count": len(counterparties), "activity_concentration": round(concentration, 4),
+                "reciprocal_relationship_count": sum(1 for a, b in pairs if a < b and (b, a) in pairs),
+                "primary_network_degree": metrics.get(primary, {}).get("in_degree", 0) + metrics.get(primary, {}).get("out_degree", 0),
+                "primary_pagerank": round(ranks.get(primary, 0.0), 8)}
 
-# ══ AGENT 4 — Regulatory Risk ═════════════════════════════════════════════════
+    @staticmethod
+    def _provisional_network_risk(evidence):
+        return round(min(1.0, .7 * evidence["suspicious_transaction_ratio"] + .2 * evidence["activity_concentration"] + .1 * int(evidence["reciprocal_relationship_count"] > 0)), 4)
+
+    def _sub_cases(self, nodes, primary):
+        candidates = [n for n in nodes if n["account_id"] != primary and n["risk_score"] >= SUBCASES_THRESHOLD]
+        candidates.sort(key=lambda n: (-n["risk_score"], -n["pagerank"], n["account_id"]))
+        return [{"account_id": n["account_id"], "risk_score": n["risk_score"], "risk_level": n["risk_level"],
+                 "reason": f"Observed suspicious share {n['risk_score']:.2f} across {n['transaction_count']} observed transaction(s)", "auto_created": True} for n in candidates[:MAX_SUBCASES]]
+
+    @staticmethod
+    def _is_suspicious(transaction):
+        is_fraud = transaction.get("is_fraud")
+        normalized_is_fraud = is_fraud.strip().lower() if isinstance(is_fraud, str) else None
+        return (
+            is_fraud is True
+            or (type(is_fraud) is int and is_fraud == 1)
+            or normalized_is_fraud in {"1", "true"}
+            or str(transaction.get("fraud_label", "")).strip().lower() in {"fraud", "suspicious"}
+        )
+
+    @staticmethod
+    def _timestamp(value):
+        if isinstance(value, datetime): return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        if isinstance(value, str):
+            try: return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError: return None
+        return None
+
 
 FATF_TYPOLOGIES = {
     "T1_Structuring": {

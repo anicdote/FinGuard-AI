@@ -25,7 +25,7 @@ class AdaptivePlanner:
     6. Always run Agent 6 (Recommendation) last
     """
 
-    def __init__(self):
+    def __init__(self, transaction_repository=None):
         from app.services.all_agents import (
             Agent1Anomaly, Agent2Evidence, Agent3Network,
             Agent4Regulatory, Agent5Explanation, Agent6Recommend
@@ -33,7 +33,7 @@ class AdaptivePlanner:
         self.agents = {
             "Agent1_Anomaly":     Agent1Anomaly(),
             "Agent2_Evidence":    Agent2Evidence(),
-            "Agent3_Network":     Agent3Network(),
+            "Agent3_Network":     Agent3Network(transaction_repository),
             "Agent4_Regulatory":  Agent4Regulatory(),
             "Agent5_Explanation": Agent5Explanation(),
             "Agent6_Recommend":   Agent6Recommend(),
@@ -120,8 +120,11 @@ class AdaptivePlanner:
 
 _planner_instance: Optional[AdaptivePlanner] = None
 
-def get_planner() -> AdaptivePlanner:
+def get_planner(transaction_repository=None) -> AdaptivePlanner:
     global _planner_instance
     if _planner_instance is None:
-        _planner_instance = AdaptivePlanner()
+        _planner_instance = AdaptivePlanner(transaction_repository)
+    elif transaction_repository is not None:
+        # The worker supplies its already-open repository; no second DB session.
+        _planner_instance.agents["Agent3_Network"].transaction_repository = transaction_repository
     return _planner_instance

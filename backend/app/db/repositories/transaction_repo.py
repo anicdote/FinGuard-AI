@@ -29,6 +29,46 @@ class TransactionRepository:
             d["_id"] = str(d["_id"])
         return docs
 
+    async def get_by_account_roles(
+        self,
+        account_id: str,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+        limit: int = 100,
+        exclude_transaction_id: Optional[str] = None,
+    ) -> List[dict]:
+        """Return transactions involving an account as origin or destination.
+
+        Time bounds are inclusive. ``exclude_transaction_id`` follows the
+        repository's existing MongoDB ``_id`` convention.
+        """
+        query = {
+            "$or": [
+                {"account_id": account_id},
+                {"counterpartyAccount": account_id},
+            ]
+        }
+
+        timestamp_query = {}
+        if start is not None:
+            timestamp_query["$gte"] = start
+        if end is not None:
+            timestamp_query["$lte"] = end
+        if timestamp_query:
+            query["timestamp"] = timestamp_query
+
+        if exclude_transaction_id:
+            query["_id"] = {"$ne": ObjectId(exclude_transaction_id)}
+
+        cursor = self.col.find(query).sort([
+            ("timestamp", -1),
+            ("_id", -1),
+        ]).limit(limit)
+        docs = await cursor.to_list(length=limit)
+        for d in docs:
+            d["_id"] = str(d["_id"])
+        return docs
+
     async def _v2_2_role_summary(self, field: str, account: str, before: datetime, transaction_type: str) -> dict:
         """Aggregate one account role strictly before ``before`` without loading rows."""
         empty = {"count": 0, "average_amount": 0.0, "type_count": 0, "last_marker": None}
