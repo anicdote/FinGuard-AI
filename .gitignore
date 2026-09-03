@@ -75,3 +75,6 @@ htmlcov/
 *.tmp
 *.temp
 *.bak
+
+# Large datasets
+backend/paysim.csv
