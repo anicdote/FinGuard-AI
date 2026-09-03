@@ -1,0 +1,48 @@
+version: "3.9"
+
+services:
+  # ── MongoDB ──────────────────────────────────────────────────────────────────
+  mongo:
+    image: mongo:7
+    container_name: finguard_mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: finguard
+
+  # ── FastAPI Backend ───────────────────────────────────────────────────────────
+  api:
+    build: ./backend
+    container_name: finguard_api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mongo
+    environment:
+      MONGODB_URL: mongodb://mongo:27017
+      MONGODB_DB: finguard
+      SECRET_KEY: change-me-in-production-32-chars!!
+      DEBUG: "true"
+      CORS_ORIGINS: '["http://localhost:5173","http://localhost:4173"]'
+    volumes:
+      - ./backend:/app
+
+  # ── React Frontend (dev server) ───────────────────────────────────────────────
+  frontend:
+    image: node:20-alpine
+    container_name: finguard_frontend
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./:/app
+    environment:
+      VITE_API_URL: http://localhost:8000
+
+volumes:
+  mongo_data:
