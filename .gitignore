@@ -78,3 +78,26 @@ htmlcov/
 
 # Large datasets
 backend/paysim.csv
+
+# Local ML experiments / evaluation artifacts
+backend/audit_*.py
+backend/evaluate_*.py
+backend/*_audit.csv
+backend/baseline_*.csv
+backend/feature_importance_audit.csv
+backend/feature_variability_audit.csv
+backend/feature_gain_audit.csv
+
+# Candidate model directories
+backend/models_candidate/
+backend/models_candidate_v2/
+backend/models_candidate_v2_1/
+backend/models_candidate_v2_2/
+backend/models_candidate_v2_3/
+
+# Candidate training scripts
+backend/train_model_candidate.py
+backend/train_model_v2_candidate.py
+backend/train_model_v2_1_candidate.py
+backend/train_model_v2_2_candidate.py
+backend/train_model_v2_3_candidate.py
