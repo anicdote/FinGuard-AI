@@ -35,6 +35,8 @@ async def analyze_pending_transactions():
             txn_id = str(txn.get("_id", txn.get("id", "unknown")))
 
             try:
+                # Agent 1 consumes strict-prior V2.2 behavioural context.
+                txn["_behavioral_history"] = await txn_repo.get_v2_2_history(txn)
                 # Run full 7-agent pipeline
                 ctx = InvestigationContext(txn_id, txn)
                 ctx = await planner.investigate(ctx)
@@ -43,11 +45,11 @@ async def analyze_pending_transactions():
                 await txn_repo.mark_analyzed(
                     txn["_id"],
                     fraud_probability = ctx.fraud_probability,
-                    is_fraud          = ctx.fraud_probability >= 0.35,
+                    is_fraud          = ctx.fraud_probability >= settings.FRAUD_THRESHOLD,
                 )
 
                 # If fraud — attach full investigation context and queue for case creation
-                if ctx.fraud_probability >= 0.35:
+                if ctx.fraud_probability >= settings.FRAUD_THRESHOLD:
                     txn["fraud_probability"]  = ctx.fraud_probability
                     txn["investigation_ctx"]  = ctx.to_dict()
                     txn["recommendation"]     = ctx.recommendation

@@ -48,7 +48,7 @@ async def create_transaction(
     # This is NOT the final investigation — the transaction still goes through
     # the Adaptive Planner / six-agent pipeline via the background worker.
     # analyzed stays False so the worker's list_unanalyzed() picks it up.
-    preliminary = fraud_service.score_transaction(doc)
+    preliminary = await fraud_service.score_transaction_with_history(doc, repo)
     doc["fraud_probability"] = preliminary["fraud_probability"]
     doc["is_fraud"]          = preliminary["is_fraud"]
     doc["risk_level"]        = preliminary["risk_level"]

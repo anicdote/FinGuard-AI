@@ -21,6 +21,8 @@ async def init_db():
     # Ensure indexes
     await _db.transactions.create_index("account_id")
     await _db.transactions.create_index("timestamp")
+    await _db.transactions.create_index([("account_id", 1), ("timestamp", -1)])
+    await _db.transactions.create_index([("counterpartyAccount", 1), ("timestamp", -1)])
     await _db.transactions.create_index("is_fraud")
     await _db.cases.create_index("account_id")
     await _db.cases.create_index("status")

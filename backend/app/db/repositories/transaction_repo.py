@@ -29,6 +29,41 @@ class TransactionRepository:
             d["_id"] = str(d["_id"])
         return docs
 
+    async def _v2_2_role_summary(self, field: str, account: str, before: datetime, transaction_type: str) -> dict:
+        """Aggregate one account role strictly before ``before`` without loading rows."""
+        empty = {"count": 0, "average_amount": 0.0, "type_count": 0, "last_marker": None}
+        if not account:
+            return empty
+        match = {field: account, "timestamp": {"$lt": before}}
+        pipeline = [{"$match": match}, {"$group": {"_id": None, "count": {"$sum": 1}, "average_amount": {"$avg": "$amount"}, "type_count": {"$sum": {"$cond": [{"$eq": [{"$toUpper": {"$ifNull": ["$paySimType", "$type"]}}, transaction_type]}, 1, 0]}}}}]
+        rows = await self.col.aggregate(pipeline).to_list(length=1)
+        if not rows:
+            return empty
+        last = await self.col.find(match, {"timestamp": 1, "step": 1}).sort("timestamp", -1).limit(1).to_list(length=1)
+        last_doc = last[0] if last else {}
+        if last_doc.get("step") is not None:
+            marker = float(last_doc["step"])
+        else:
+            timestamp = last_doc.get("timestamp")
+            if timestamp and timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            marker = timestamp.timestamp() / 3600.0 if timestamp else None
+        row = rows[0]
+        return {"count": int(row["count"]), "average_amount": float(row.get("average_amount") or 0), "type_count": int(row.get("type_count", 0)), "last_marker": marker}
+
+    async def get_v2_2_history(self, txn: dict) -> dict:
+        """Return V2.2 origin/destination context from records before this transaction."""
+        before = txn.get("timestamp") or datetime.now(timezone.utc)
+        if isinstance(before, str):
+            before = datetime.fromisoformat(before.replace("Z", "+00:00"))
+        if before.tzinfo is None:
+            before = before.replace(tzinfo=timezone.utc)
+        transaction_type = str(txn.get("paySimType", txn.get("type", "PAYMENT"))).upper()
+        return {
+            "origin": await self._v2_2_role_summary("account_id", txn.get("account_id", txn.get("nameOrig", "")), before, transaction_type),
+            "destination": await self._v2_2_role_summary("counterpartyAccount", txn.get("counterpartyAccount", txn.get("nameDest", "")), before, transaction_type),
+        }
+
     async def list_recent(self, limit: int = 50, skip: int = 0) -> List[dict]:
         cursor = self.col.find().sort("timestamp", -1).skip(skip).limit(limit)
         docs = await cursor.to_list(length=limit)
