@@ -28,7 +28,7 @@ async def analyze_pending_transactions():
             return
 
         logger.info(f"[Worker] Investigating {len(unanalyzed)} transactions via Adaptive Planner...")
-        planner    = get_planner()
+        planner    = get_planner(txn_repo)
         fraud_txns = []
 
         for txn in unanalyzed:
