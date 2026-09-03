@@ -213,88 +213,531 @@ class Agent3Network:
 
 # ══ AGENT 4 — Regulatory Risk ═════════════════════════════════════════════════
 
+# ══ AGENT 4 — Regulatory Risk ═══════════════════════════════════════════════
+
+# These are project-level regulatory reference mappings.
+# They are used to support an investigation and are NOT a final legal
+# determination. Do not treat these mappings as legal advice.
+
 FATF_TYPOLOGIES = {
     "T1_Structuring": {
         "name": "Structuring / Smurfing",
-        "description": "Breaking large amounts into smaller transactions to avoid reporting thresholds",
+        "description": (
+            "Breaking large amounts into smaller transactions to avoid "
+            "reporting thresholds"
+        ),
         "pmla_section": "Section 3 & Section 12(1)(a)",
-        "indicators": ["structuring_near_ctr", "round_amount", "multiple_transactions"],
+        "indicators": [
+            "structuring_near_ctr",
+            "round_amount",
+            "multiple_transactions",
+        ],
         "severity": 0.85,
     },
     "T2_TBML": {
         "name": "Trade-Based Money Laundering",
-        "description": "Using international trade transactions to move illicit funds",
+        "description": (
+            "Using international trade transactions to move illicit funds"
+        ),
         "pmla_section": "Section 3",
-        "indicators": ["high_risk_channel", "international_transfer"],
+        "indicators": [
+            "high_risk_channel",
+            "international_transfer",
+        ],
         "severity": 0.80,
     },
     "T3_Layering": {
         "name": "Layering",
-        "description": "Complex series of transactions to disguise origin of funds",
+        "description": (
+            "Complex series of transactions to disguise origin of funds"
+        ),
         "pmla_section": "Section 3 & Section 4",
-        "indicators": ["complete_balance_drain", "high_risk_channel", "above_ctr_threshold"],
+        "indicators": [
+            "complete_balance_drain",
+            "high_risk_channel",
+            "above_ctr_threshold",
+        ],
         "severity": 0.90,
     },
     "T4_CyberFraud": {
         "name": "Cyber-Enabled Fraud",
-        "description": "Account takeover, SIM-swap, or digital fraud patterns",
+        "description": (
+            "Account takeover, SIM-swap, or digital fraud patterns"
+        ),
         "pmla_section": "Section 3",
-        "indicators": ["night_hour_transaction", "high_risk_channel", "complete_balance_drain"],
+        "indicators": [
+            "night_hour_transaction",
+            "high_risk_channel",
+            "complete_balance_drain",
+        ],
         "severity": 0.75,
     },
     "T5_CashIntensive": {
         "name": "Cash-Intensive Business",
-        "description": "Unusually high cash transactions inconsistent with account profile",
+        "description": (
+            "Unusually high cash transactions inconsistent with account profile"
+        ),
         "pmla_section": "Section 12(1)(a)",
-        "indicators": ["above_ctr_threshold", "round_amount"],
+        "indicators": [
+            "above_ctr_threshold",
+            "round_amount",
+        ],
         "severity": 0.70,
     },
 }
 
+# Agent 4 project-level assessment thresholds.
+# These are transparent demo thresholds, not legal/regulatory determinations.
+AGENT4_NETWORK_SIGNAL_NODES = 2
+AGENT4_STRONG_NETWORK_NODES = 5
+AGENT4_STRONG_EVIDENCE_THRESHOLD = 0.65
+
+AGENT4_RISK_CRITICAL_THRESHOLD = 0.75
+AGENT4_RISK_HIGH_THRESHOLD = 0.55
+AGENT4_RISK_MEDIUM_THRESHOLD = 0.30
+
+AGENT4_TYPOLOGY_CONFIDENCE_BASE = 0.30
+AGENT4_TYPOLOGY_CONFIDENCE_SCALE = 0.65
+AGENT4_MAX_TYPOLOGY_CONFIDENCE = 0.95
 
 class Agent4Regulatory:
+
     async def run(self, ctx: InvestigationContext) -> InvestigationContext:
-        logger.info(f"[Agent4] Regulatory assessment for {ctx.transaction_id}")
-        patterns    = ctx.evidence.get("patterns", [])
-        prob        = ctx.fraud_probability
-        has_network = ctx.network.get("node_count", 0) > 2
+        logger.info(
+            f"[Agent4] Regulatory assessment for {ctx.transaction_id}"
+        )
 
-        matched     = []
-        pmla_secs   = set()
-        max_sev     = 0.0
+        patterns = list(ctx.evidence.get("patterns", []))
+        fraud_probability = self._clamp(ctx.fraud_probability)
+        evidence_confidence = self._clamp(
+            ctx.evidence.get("evidence_confidence", 0.0)
+        )
 
-        for code, typo in FATF_TYPOLOGIES.items():
-            hits = sum(1 for ind in typo["indicators"] if ind in patterns)
-            if prob >= 0.7 and code == "T3_Layering":          hits += 1
-            if has_network and code == "T3_Layering":          hits += 1
-            if ctx.watchlist_hit and code in ("T2_TBML","T3_Layering"): hits += 2
+        # Agent 3 is still under development.
+        # Therefore Agent 4 must safely handle missing or partial network data.
+        network = ctx.network if isinstance(ctx.network, dict) else {}
+        node_count = self._safe_int(network.get("node_count", 0))
+        sub_case_count = len(ctx.sub_cases or [])
 
-            if hits >= 1:
-                conf = min(hits / len(typo["indicators"]) * 0.9 + 0.1, 0.99)
-                matched.append({"code": code, "name": typo["name"],
-                                 "description": typo["description"],
-                                 "confidence": round(conf, 3),
-                                 "severity": typo["severity"],
-                                 "pmla": typo["pmla_section"]})
-                pmla_secs.add(typo["pmla_section"])
-                max_sev = max(max_sev, typo["severity"])
+        has_network_signal = node_count > AGENT4_NETWORK_SIGNAL_NODES
+        has_strong_network_signal = node_count > AGENT4_STRONG_NETWORK_NODES
 
-        matched.sort(key=lambda x: x["confidence"], reverse=True)
-        reg_conf = (sum(t["confidence"] for t in matched) / len(matched)
-                    if matched else 0.3)
+        watchlist_hit = bool(ctx.watchlist_hit or ctx.watchlist_hits)
 
-        ctx.set_regulatory({
-            "fatf_typologies":       matched,
-            "primary_typology":      matched[0] if matched else None,
-            "pmla_sections":         list(pmla_secs),
-            "regulatory_confidence": round(reg_conf, 3),
-            "max_severity":          round(max_sev, 3),
-            "fiu_ind_reportable":    prob >= 0.5 or bool(matched),
-            "str_required":          prob >= 0.7 or max_sev >= 0.80,
-        })
-        logger.info(f"[Agent4] typologies={[t['code'] for t in matched]}")
+        # ---------------------------------------------------------------
+        # 1. Match regulatory typologies using ONLY available evidence.
+        # ---------------------------------------------------------------
+
+        matched = []
+        pmla_sections = set()
+
+        for code, typology in FATF_TYPOLOGIES.items():
+
+            indicator_hits = [
+                indicator
+                for indicator in typology["indicators"]
+                if indicator in patterns
+            ]
+
+            # Network information can support Layering, but does not create
+            # a typology match by itself unless other evidence exists.
+            if (
+                code == "T3_Layering"
+                and has_network_signal
+                and indicator_hits
+            ):
+                indicator_hits.append("network_risk")
+
+            # A watchlist hit is regulatory context, but it should not
+            # manufacture a typology match on its own.
+            if watchlist_hit and indicator_hits:
+                indicator_hits.append("watchlist_hit")
+
+            if not indicator_hits:
+                continue
+
+            base_confidence = len(
+                set(indicator_hits)
+                & set(typology["indicators"])
+            ) / len(typology["indicators"])
+
+            # Keep confidence evidence-driven and bounded.
+            confidence = min(
+    AGENT4_MAX_TYPOLOGY_CONFIDENCE,
+    AGENT4_TYPOLOGY_CONFIDENCE_BASE
+    + (base_confidence * AGENT4_TYPOLOGY_CONFIDENCE_SCALE),
+)
+
+            matched.append(
+                {
+                    "code": code,
+                    "name": typology["name"],
+                    "description": typology["description"],
+                    "confidence": round(confidence, 3),
+                    "severity": typology["severity"],
+                    "pmla": typology["pmla_section"],
+                    "matched_indicators": list(
+                        dict.fromkeys(indicator_hits)
+                    ),
+                }
+            )
+
+            pmla_sections.add(typology["pmla_section"])
+
+        matched.sort(
+            key=lambda item: (
+                item["confidence"],
+                item["severity"],
+            ),
+            reverse=True,
+        )
+
+        # ---------------------------------------------------------------
+        # 2. Build evidence-backed regulatory signals.
+        # ---------------------------------------------------------------
+
+        supporting_evidence = []
+
+        if patterns:
+            supporting_evidence.append(
+                {
+                    "source": "Agent2_Evidence",
+                    "type": "transaction_patterns",
+                    "items": patterns,
+                }
+            )
+
+        if watchlist_hit:
+            supporting_evidence.append(
+                {
+                    "source": "Agent2_Evidence",
+                    "type": "watchlist",
+                    "items": ctx.watchlist_hits,
+                }
+            )
+
+        if has_network_signal:
+            supporting_evidence.append(
+                {
+                    "source": "Agent3_Network",
+                    "type": "network",
+                    "items": {
+                        "node_count": node_count,
+                        "sub_case_count": sub_case_count,
+                        "high_risk_network": has_strong_network_signal,
+                    },
+                }
+            )
+
+        # Fraud probability is explicitly retained as an anomaly signal,
+        # but is NOT treated as regulatory evidence by itself.
+        if fraud_probability > 0:
+            supporting_evidence.append(
+                {
+                    "source": "Agent1_Anomaly",
+                    "type": "anomaly_signal",
+                    "items": {
+                        "fraud_probability": round(
+                            fraud_probability,
+                            4,
+                        ),
+                        "risk_level": ctx.risk_level,
+                    },
+                }
+            )
+
+        # ---------------------------------------------------------------
+        # 3. Determine overall regulatory risk.
+        #
+        # This is an explainable project-level assessment, not a legal
+        # determination. Each available dimension contributes independently.
+        # ---------------------------------------------------------------
+
+        risk_components = []
+
+        if evidence_confidence > 0:
+            risk_components.append(evidence_confidence)
+
+        if matched:
+            risk_components.append(
+                max(item["confidence"] for item in matched)
+            )
+
+        if watchlist_hit:
+            risk_components.append(1.0)
+
+        if has_network_signal:
+            network_signal = min(node_count / 10.0, 1.0)
+            risk_components.append(network_signal)
+
+        # Fraud contributes to overall investigation risk, but never creates
+        # an STR recommendation by itself.
+        risk_components.append(fraud_probability)
+
+        risk_score = (
+            sum(risk_components) / len(risk_components)
+            if risk_components
+            else 0.0
+        )
+
+        if risk_score >= AGENT4_RISK_CRITICAL_THRESHOLD:
+            overall_risk = "critical"
+        elif risk_score >= AGENT4_RISK_HIGH_THRESHOLD:
+            overall_risk = "high"
+        elif risk_score >= AGENT4_RISK_MEDIUM_THRESHOLD:
+            overall_risk = "medium"
+        else:
+            overall_risk = "low"
+
+        # ---------------------------------------------------------------
+        # 4. Assess reportability separately from fraud risk.
+        #
+        # A high fraud probability alone is NOT sufficient.
+        # ---------------------------------------------------------------
+
+        independent_regulatory_signals = 0
+
+        if matched:
+            independent_regulatory_signals += 1
+
+        if watchlist_hit:
+            independent_regulatory_signals += 1
+
+        if has_strong_network_signal:
+            independent_regulatory_signals += 1
+
+        strong_evidence = (
+    evidence_confidence >= AGENT4_STRONG_EVIDENCE_THRESHOLD
+)
+
+        if (
+            independent_regulatory_signals >= 2
+            and strong_evidence
+        ):
+            reportability_status = "STR_REVIEW_RECOMMENDED"
+            reportability_confidence = min(
+                0.95,
+                0.55
+                + 0.10 * independent_regulatory_signals
+                + 0.20 * evidence_confidence,
+            )
+            str_recommendation = "REVIEW_FOR_STR"
+            reportability_reason = (
+                "Multiple independent regulatory indicators are supported "
+                "by available investigation evidence."
+            )
+
+        elif (
+            independent_regulatory_signals >= 1
+            or strong_evidence
+        ):
+            reportability_status = "FURTHER_REVIEW_REQUIRED"
+            reportability_confidence = 0.60
+            str_recommendation = "FURTHER_REVIEW"
+            reportability_reason = (
+                "The investigation contains risk indicators, but the "
+                "available evidence is not sufficient for a strong "
+                "reportability conclusion."
+            )
+
+        else:
+            reportability_status = "NOT_ENOUGH_EVIDENCE"
+            reportability_confidence = 0.35
+            str_recommendation = "NO_STR_RECOMMENDATION"
+            reportability_reason = (
+                "The available investigation context does not contain "
+                "sufficient independent regulatory indicators."
+            )
+
+        # ---------------------------------------------------------------
+        # 5. Identify information that is unavailable to Agent 4.
+        # ---------------------------------------------------------------
+
+        missing_information = []
+
+        if not ctx.transaction.get("customer_id"):
+            missing_information.append(
+                "Customer identification information is not available "
+                "in the investigation context."
+            )
+
+        if not ctx.transaction.get("source_of_funds"):
+            missing_information.append(
+                "Source-of-funds information is not available."
+            )
+
+        if not ctx.transaction.get("beneficial_owner"):
+            missing_information.append(
+                "Beneficial-owner information is not available."
+            )
+
+        if not ctx.transaction.get("transaction_history"):
+            missing_information.append(
+                "Broader transaction history is not available."
+            )
+
+        if not (
+    ctx.transaction.get("counterparty")
+    or ctx.transaction.get("nameDest")
+):
+            missing_information.append(
+                "Counterparty details are limited or unavailable."
+            )
+
+        if not network:
+            missing_information.append(
+                "Network investigation data is not available."
+            )
+
+        # ---------------------------------------------------------------
+        # 6. Build a concise, traceable rationale.
+        # ---------------------------------------------------------------
+
+        rationale_parts = []
+
+        if matched:
+            rationale_parts.append(
+                "Matched typologies: "
+                + ", ".join(item["code"] for item in matched)
+                + "."
+            )
+
+        if patterns:
+            rationale_parts.append(
+                "Observed transaction patterns: "
+                + ", ".join(patterns)
+                + "."
+            )
+
+        if watchlist_hit:
+            rationale_parts.append(
+                f"Watchlist/PEP matches detected: "
+                f"{len(ctx.watchlist_hits)}."
+            )
+
+        if has_network_signal:
+            rationale_parts.append(
+                f"Network investigation contains {node_count} nodes "
+                f"and {sub_case_count} sub-case(s)."
+            )
+
+        rationale_parts.append(reportability_reason)
+
+        # ---------------------------------------------------------------
+        # 7. Preserve legacy fields consumed by Agents 5/6/frontend.
+        # ---------------------------------------------------------------
+
+        regulatory_confidence = (
+            sum(item["confidence"] for item in matched) / len(matched)
+            if matched
+            else (
+                evidence_confidence
+                if evidence_confidence > 0
+                else 0.30
+            )
+        )
+
+        max_severity = max(
+            (item["severity"] for item in matched),
+            default=0.0,
+        )
+
+        # Legacy boolean fields are now derived from the structured
+        # reportability assessment rather than fraud probability alone.
+        str_required = (
+            reportability_status == "STR_REVIEW_RECOMMENDED"
+        )
+
+        fiu_ind_reportable = str_required
+
+        regulatory_result = {
+            # Existing compatibility fields
+            "fatf_typologies": matched,
+            "primary_typology": matched[0] if matched else None,
+            "pmla_sections": list(pmla_sections),
+            "regulatory_confidence": round(
+                regulatory_confidence,
+                3,
+            ),
+            "max_severity": round(max_severity, 3),
+            "fiu_ind_reportable": fiu_ind_reportable,
+            "str_required": str_required,
+
+            # New structured Agent 4 assessment
+            "overall_risk": overall_risk,
+            "risk_score": round(risk_score, 3),
+
+            "regulatory_references": [
+                {
+                    "reference": item["pmla"],
+                    "typology": item["code"],
+                    "reference_type": "project_reference",
+                    "legal_determination": False,
+                }
+                for item in matched
+            ],
+
+            "reportability_assessment": {
+                "status": reportability_status,
+                "confidence": round(
+                    reportability_confidence,
+                    3,
+                ),
+                "recommendation": str_recommendation,
+                "rationale": reportability_reason,
+            },
+
+            "str_assessment": {
+                "recommendation": str_recommendation,
+                "confidence": round(
+                    reportability_confidence,
+                    3,
+                ),
+                "supporting_typologies": [
+                    item["code"] for item in matched
+                ],
+            },
+
+            "supporting_evidence": supporting_evidence,
+
+            "missing_information": missing_information,
+
+            "rationale": " ".join(rationale_parts),
+
+            "assessment_scope": (
+                "Project-level regulatory risk assessment based only "
+                "on the investigation context available to Agent 4. "
+                "This is not a final legal determination."
+            ),
+        }
+
+        ctx.set_regulatory(regulatory_result)
+
+        logger.info(
+            f"[Agent4] typologies="
+            f"{[item['code'] for item in matched]} "
+            f"risk={overall_risk} "
+            f"reportability={reportability_status}"
+        )
+
         return ctx
 
+    @staticmethod
+    def _clamp(value: Any) -> float:
+        try:
+            return round(
+                min(max(float(value), 0.0), 1.0),
+                4,
+            )
+        except (TypeError, ValueError):
+            return 0.0
+
+    @staticmethod
+    def _safe_int(value: Any) -> int:
+        try:
+            return max(int(value), 0)
+        except (TypeError, ValueError):
+            return 0
 
 # ══ AGENT 5 — Explanation + STR ═══════════════════════════════════════════════
 

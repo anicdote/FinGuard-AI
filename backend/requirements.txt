@@ -8,8 +8,12 @@ python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 python-multipart==0.0.18  # OAuth2 form data
 # Optional ML model persistence
-# scikit-learn==1.5.2
-# xgboost==2.1.3
-# joblib==1.4.2
-# numpy==1.26.4
+scikit-learn==1.5.2
+xgboost==2.1.3
+joblib==1.4.2
+numpy==1.26.4
 # pandas==2.2.3
+
+email-validator==2.2.0
+httpx==0.28.1
+mongomock-motor==0.0.36
