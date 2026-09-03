@@ -45,7 +45,7 @@ class InvestigationContext:
         # ── Flags ─────────────────────────────────────────────────────────────
         self.disagreement_flag: bool = False   # XGB vs IF disagree
         self.watchlist_hit:     bool = False   # counterparty on watchlist
-        self.high_risk_network: bool = False   # large fraud ring found
+        self.high_risk_network: bool = False   # behavioral network risk is high
 
     # ── Agent write helpers ───────────────────────────────────────────────────
 
@@ -65,7 +65,7 @@ class InvestigationContext:
                   f"prob={probability:.3f} disagree={disagreement}")
 
     def set_evidence(self, evidence: dict, watchlist_hits: List[Dict]):
-        self.evidence      = evidence
+        self.evidence       = evidence
         self.watchlist_hits = watchlist_hits
         self.watchlist_hit  = len(watchlist_hits) > 0
         conf = evidence.get("evidence_confidence", 0.5)
@@ -75,14 +75,42 @@ class InvestigationContext:
                   f"watchlist_hits={len(watchlist_hits)}")
 
     def set_network(self, network: dict, sub_cases: List[Dict]):
-        self.network         = network
-        self.sub_cases       = sub_cases
-        self.high_risk_network = network.get("node_count", 0) > 5
-        conf = min(network.get("node_count", 0) / 20, 1.0)
+        self.network   = network
+        self.sub_cases = sub_cases
+
+        # Agent 3 produces a behavioral, label-independent network-risk score.
+        # Network size alone must not classify a network as high risk.
+        network_evidence = network.get("evidence", {}) or {}
+
+        try:
+            network_risk = float(
+                network_evidence.get(
+                    "provisional_network_risk_score", 0.0
+                ) or 0.0
+            )
+        except (TypeError, ValueError):
+            network_risk = 0.0
+
+        # Conservative threshold for downstream regulatory handling.
+        # This keeps high_risk_network compatible with existing consumers
+        # while basing it on Agent 3 behavioral evidence rather than node count.
+        self.high_risk_network = network_risk >= 0.65
+
+        # Preserve the existing Agent 3 confidence behavior for compatibility.
+        try:
+            node_count = float(network.get("node_count", 0) or 0)
+        except (TypeError, ValueError):
+            node_count = 0.0
+
+        conf = min(node_count / 20, 1.0)
         self.confidence_scores["agent3_network"] = round(conf, 4)
-        self._log("Agent3_Network",
-                  f"nodes={network.get('node_count', 0)} "
-                  f"sub_cases={len(sub_cases)}")
+
+        self._log(
+            "Agent3_Network",
+            f"nodes={network.get('node_count', 0)} "
+            f"sub_cases={len(sub_cases)} "
+            f"network_risk={network_risk:.3f}"
+        )
 
     def set_regulatory(self, regulatory: dict):
         self.regulatory = regulatory
@@ -96,7 +124,10 @@ class InvestigationContext:
         self.explanation   = explanation
         self.str_narrative = str_narrative
         self.confidence_scores["agent5_explanation"] = 0.9
-        self._log("Agent5_Explanation", f"STR narrative generated ({len(str_narrative)} chars)")
+        self._log(
+            "Agent5_Explanation",
+            f"STR narrative generated ({len(str_narrative)} chars)"
+        )
 
     def set_recommendation(self, action: str, confidence: float,
                            reasoning: str, regulatory_basis: str):
@@ -109,8 +140,10 @@ class InvestigationContext:
             "timestamp":        utcnow(),
         }
         self.confidence_scores["agent6_recommendation"] = round(confidence, 4)
-        self._log("Agent6_Recommend",
-                  f"action={action} confidence={confidence:.3f}")
+        self._log(
+            "Agent6_Recommend",
+            f"action={action} confidence={confidence:.3f}"
+        )
 
     # ── Read helpers ──────────────────────────────────────────────────────────
 
@@ -171,7 +204,10 @@ class InvestigationContext:
 
     @staticmethod
     def _risk_level(prob: float) -> str:
-        if prob >= 0.85: return "critical"
-        if prob >= 0.65: return "high"
-        if prob >= 0.40: return "medium"
+        if prob >= 0.85:
+            return "critical"
+        if prob >= 0.65:
+            return "high"
+        if prob >= 0.40:
+            return "medium"
         return "low"
