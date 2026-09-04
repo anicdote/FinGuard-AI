@@ -54,15 +54,16 @@ FinGuard AI uses an **adaptive multi-agent architecture** where a planner decide
 > Save the hackathon deck screenshots into `docs/screenshots/` using the filenames below (or update the paths) so they render here.
 
 ### Overview — FATF Typology Mapping, Sub-Cases & SHAP Explanation
-<img width="737" height="353" alt="overview-shap" src="https://github.com/user-attachments/assets/9c8c3c11-17bc-47f4-8bc4-7cd83a909ce4" />
+<img width="1351" height="641" alt="WhatsApp Image 2026-09-05 at 5 16 58 AM" src="https://github.com/user-attachments/assets/71c1cbd2-e0fa-4b17-96ab-679f32f41603" />
+
 
 
 ### Evidence — Confidence Scoring, Suspicious Patterns & Watchlist Screening
-<img width="727" height="353" alt="evidence-panel" src="https://github.com/user-attachments/assets/447ff0c1-2aa5-4edb-a170-26dfdf2983b8" />
+<img width="1349" height="640" alt="WhatsApp Image 2026-09-05 at 5 16 57 AM" src="https://github.com/user-attachments/assets/c09f121f-1a32-4226-8765-4c3cb3eab50e" />
 
 
 ### STR Report — Auto-Generated Suspicious Transaction Report
-<img width="737" height="329" alt="str-report" src="https://github.com/user-attachments/assets/d51e9d42-4d18-4d4a-a8dd-630e3267e9c0" />
+<img width="1348" height="638" alt="WhatsApp Image 2026-09-05 at 5 16 58 AM (1)" src="https://github.com/user-attachments/assets/a59d1bdb-ebc5-4632-af64-5cff9a4c15ad" />
 
 
 ### Hardware — Biometric Second-Factor Verification Rig
