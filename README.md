@@ -54,22 +54,24 @@ FinGuard AI uses an **adaptive multi-agent architecture** where a planner decide
 > Save the hackathon deck screenshots into `docs/screenshots/` using the filenames below (or update the paths) so they render here.
 
 ### Overview — FATF Typology Mapping, Sub-Cases & SHAP Explanation
-![Overview tab — FATF typologies, escalated sub-cases, and SHAP explanation for a flagged transaction](docs/screenshots/overview-shap.png)
+<img width="737" height="353" alt="overview-shap" src="https://github.com/user-attachments/assets/9c8c3c11-17bc-47f4-8bc4-7cd83a909ce4" />
+
 
 ### Evidence — Confidence Scoring, Suspicious Patterns & Watchlist Screening
-![Evidence tab — Agent 2 confidence score, risk boost, detected patterns, and watchlist/PEP screening](docs/screenshots/evidence-panel.png)
+<img width="727" height="353" alt="evidence-panel" src="https://github.com/user-attachments/assets/447ff0c1-2aa5-4edb-a170-26dfdf2983b8" />
+
 
 ### STR Report — Auto-Generated Suspicious Transaction Report
-![STR Report tab — auto-generated PMLA 2002 / FIU-IND aligned Suspicious Transaction Report](docs/screenshots/str-report.png)
+<img width="737" height="329" alt="str-report" src="https://github.com/user-attachments/assets/d51e9d42-4d18-4d4a-a8dd-630e3267e9c0" />
+
 
 ### Hardware — Biometric Second-Factor Verification Rig
-![Arduino Uno with fingerprint sensor, LCD, and buzzer used for biometric login and STR submission verification](docs/screenshots/hardware-setup.png)
+<img width="727" height="329" alt="hardware-setup" src="https://github.com/user-attachments/assets/ab89f1b5-d544-4690-bce8-a267ee658669" />
+
 
 ---
 
 ## Technical Architecture
-
-![High-level system architecture diagram of FinGuard AI](docs/screenshots/architecture.png)
 
 ```
 Transaction → Agent 1 (Anomaly Detection) → Adaptive Planner
