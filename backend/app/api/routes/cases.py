@@ -1,6 +1,7 @@
 """Case routes — list, fetch, update status."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone
@@ -11,6 +12,11 @@ from app.db.repositories.case_repo import CaseRepository
 from app.db.repositories.transaction_repo import TransactionRepository
 from app.db.repositories.user_repo import UserRepository
 from app.db.repositories.audit_repo import AuditRepository
+from app.db.repositories.biometric_repo import BiometricChallengeRepository
+from app.schemas.biometric import BiometricChallengeResponse
+from app.services.hardware.biometric_workflow import biometric_workflow, utcnow
+from app.services.hardware.fingerprint import HardwareBusyError, HardwareUnavailableError
+from app.services.str_report import render_str, str_filename
 
 router = APIRouter()
 
@@ -48,6 +54,16 @@ async def _audit(
         performed_by=_actor(user) if user else None,
         metadata=metadata or {},
     )
+
+
+async def _authorised_case_for_biometric_download(db, case_id: str, current_user: dict) -> dict:
+    """Apply the primary application's existing case visibility rules."""
+    case = await CaseRepository(db).get_by_id(case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+    if normalize_role(current_user.get("role")) == "officer" and case.get("assigned_officer_id") != str(current_user.get("_id")):
+        raise HTTPException(status_code=403, detail="This case is not assigned to you")
+    return case
 
 
 
@@ -454,3 +470,51 @@ async def update_case_status(
         },
     )
     return {"case_id": case_id, "status": body.status, "updated": True}
+
+
+@router.post("/{case_id}/str/download-challenge", response_model=BiometricChallengeResponse, status_code=202)
+async def start_str_download_challenge(case_id: str, current_user=Depends(get_current_user)):
+    """Start a fresh local fingerprint check for one official STR download."""
+    db = await get_db()
+    case = await _authorised_case_for_biometric_download(db, case_id, current_user)
+    try:
+        return biometric_workflow.response(await biometric_workflow.start_str_download(current_user, case, db))
+    except HardwareBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except HardwareUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.get("/{case_id}/str/download-challenge/{challenge_id}", response_model=BiometricChallengeResponse)
+async def check_str_download_challenge(case_id: str, challenge_id: str, current_user=Depends(get_current_user)):
+    db = await get_db()
+    await _authorised_case_for_biometric_download(db, case_id, current_user)
+    try:
+        return await biometric_workflow.download_challenge_response(challenge_id, case_id, current_user, db)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/{case_id}/str/download")
+async def download_str(case_id: str, challenge_id: str = Query(..., min_length=1), current_user=Depends(get_current_user)):
+    """Consume exactly one successful biometric authorization and return an attachment."""
+    db = await get_db()
+    case = await _authorised_case_for_biometric_download(db, case_id, current_user)
+    consumed = await BiometricChallengeRepository(db).consume_download(
+        challenge_id, str(current_user["_id"]), case_id, utcnow())
+    if not consumed:
+        await _audit(db, case_id, "str_download_denied", current_user, {"reason": "invalid_or_consumed_biometric_challenge"})
+        raise HTTPException(status_code=403, detail="A valid, unexpired biometric download authorization is required")
+    try:
+        content = render_str(case)
+    except ValueError as exc:
+        # The authorization remains consumed: do not permit replay after a failed artifact request.
+        await _audit(db, case_id, "str_download_denied", current_user, {"reason": "missing_str_narrative"})
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await _audit(db, case_id, "str_download_consumed", current_user)
+    return Response(content=content, media_type="text/plain", headers={
+        "Content-Disposition": f'attachment; filename="{str_filename(case_id)}"',
+        "Cache-Control": "no-store",
+    })

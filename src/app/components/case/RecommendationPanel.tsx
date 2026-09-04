@@ -34,7 +34,7 @@ export function RecommendationPanel({
   riskScore,
   disagreementFlag,
 }: RecommendationPanelProps) {
-  const action        = recommendation?.caseAction ?? recommendation?.decision ?? recommendation?.action;
+  const action        = recommendation?.decision ?? recommendation?.action ?? recommendation?.caseAction;
   const cfg            = (action && ACTION_CONFIG[action]) ?? null;
   const Icon           = cfg?.icon ?? Eye;
   const confidencePct  = recommendation?.confidencePct ?? (recommendation?.confidence ? recommendation.confidence * 100 : undefined);
@@ -43,6 +43,9 @@ export function RecommendationPanel({
   const riskColor      = RISK_LEVEL_CONFIG[riskLevel]?.color ?? "#1A3A6B";
   const formatLabel = (value: string) => value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
   const formatPercent = (value: number) => `${(value <= 1 ? value * 100 : value).toFixed(0)}%`;
+  const humanAction = recommendation?.caseAction === "route_to_str_review_not_filed"
+    ? "Route to STR Review — Not Filed"
+    : recommendation?.caseAction;
   const structuredFields = [
     ["Decision", recommendation?.decision],
     ["Decision Category", recommendation?.decisionCategory],
@@ -50,7 +53,7 @@ export function RecommendationPanel({
     ["Operational Risk Score", typeof recommendation?.operationalRiskScore === "number" ? formatPercent(recommendation.operationalRiskScore) : undefined],
     ["Network Risk Score", typeof recommendation?.networkRiskScore === "number" ? formatPercent(recommendation.networkRiskScore) : undefined],
     ["Human Review Required", typeof recommendation?.requiresHumanReview === "boolean" ? (recommendation.requiresHumanReview ? "Yes" : "No") : undefined],
-    ["Case Action", recommendation?.caseAction],
+    ["Case Action", humanAction],
     ["STR Review Status", recommendation?.strStatus],
     ["STR Filing Status", recommendation?.strFilingStatus],
   ].filter(([, value]) => value !== undefined && value !== null && value !== "") as [string, string][];
@@ -152,7 +155,7 @@ export function RecommendationPanel({
               )}
               {recommendation?.missingInformation && recommendation.missingInformation.length > 0 && (
                 <div className="mt-3 rounded border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800">
-                  <span className="font-semibold">Missing information:</span> {recommendation.missingInformation.join(" · ")}
+                  <span className="font-semibold">Missing information:</span> {[...new Map(recommendation.missingInformation.map((item) => [item.toLowerCase().replace(/not available/g, "unavailable").replace(/customer identification information.*$/i, "customer identification information"), item])).values()].join(" · ")}
                 </div>
               )}
             </>

@@ -96,7 +96,7 @@ export function CaseDetail() {
   const anomalyScore = c.anomalyScore ?? (caseData as any).anomaly_score ?? 0;
   const detectedAt  = safeDate(c.detectedAt ?? (caseData as any).detected_at);
   const fatfTypology = c.fatfTypology ?? (caseData as any).fatf_typology ?? [];
-  const strNarrative = c.strNarrative ?? (caseData as any).str_narrative ?? "";
+  const persistedStrNarrative = c.strNarrative ?? (caseData as any).str_narrative ?? "";
 
   const suspiciousTxns: any[] = c.suspiciousTransactions
     ?? (caseData as any).suspicious_transactions
@@ -119,6 +119,13 @@ export function CaseDetail() {
     strStatus: storedRecommendation.strStatus ?? c.strStatus,
     strFilingStatus: storedRecommendation.strFilingStatus ?? c.strFilingStatus,
   };
+  // Agent 6 preserves Agent 5's draft for compatibility.  Prefer the original
+  // case field, then use that persisted compatible field for older cases.
+  const strNarrative = persistedStrNarrative
+    || storedRecommendation.agent5StrDraft
+    || (storedRecommendation as any).agent5_str_draft
+    || investigation.strNarrative
+    || "";
   const recommendationAction = recommendation.caseAction ?? recommendation.decision ?? recommendation.action;
   const explanation    = c.explanation    ?? investigation.explanation    ?? "";
   const shapValues      = c.shapValues      ?? investigation.shapValues      ?? [];
@@ -572,7 +579,7 @@ export function CaseDetail() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-sm">FATF Typology Mapping</CardTitle>
-                <CardDescription>Identified money laundering patterns</CardDescription>
+                <CardDescription>Detected regulatory typologies</CardDescription>
               </CardHeader>
               <CardContent>
                 {fatfTypology.length === 0 ? (
@@ -644,7 +651,7 @@ export function CaseDetail() {
           <TransactionTimeline transactions={suspiciousTxns} />
         </TabsContent>
         <TabsContent value="str">
-          <STRReport narrative={strNarrative} caseData={caseData} />
+          <STRReport narrative={strNarrative} caseData={caseData} agentLog={agentLog} explanation={explanation} />
         </TabsContent>
       </Tabs>
     </div>

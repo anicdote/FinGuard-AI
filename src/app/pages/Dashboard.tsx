@@ -24,7 +24,7 @@ export function Dashboard() {
         <StatsCard title="Critical Cases" value={statsLoading ? "…" : s.criticalCases} subtitle="Require immediate review" icon={AlertTriangle} color="red" />
         <StatsCard title="High Priority" value={statsLoading ? "…" : s.highPriorityCases} subtitle="Prioritised for investigation" icon={TrendingUp} color="orange" />
         <StatsCard title="Avg Processing" value={statsLoading ? "…" : `${s.avgProcessingTime}s`} subtitle="Measured pipeline runtime" icon={Clock} color="green" />
-        <StatsCard title="STRs Pending" value={statsLoading ? "…" : s.strFilingsPending} subtitle="Awaiting compliance review" icon={FileText} color="blue" />
+        <StatsCard title="Cases Pending Review" value={statsLoading ? "…" : s.strFilingsPending} subtitle="Awaiting compliance review" icon={FileText} color="blue" />
       </div>
 
       <div className="mb-7"><AgentPipeline /></div>

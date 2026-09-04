@@ -16,7 +16,8 @@ interface User {
 interface AuthContextValue {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  beginLogin: (email: string, password: string) => Promise<any>;
+  checkLoginChallenge: (challengeId: string, challengeToken: string) => Promise<any>;
   logout: () => void;
 }
 
@@ -35,10 +36,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
-  async function login(email: string, password: string) {
-    await authApi.login(email, password);
-    const me = await authApi.me();
-    setUser(me);
+  async function beginLogin(email: string, password: string) {
+    return authApi.beginLogin(email, password);
+  }
+
+  async function checkLoginChallenge(challengeId: string, challengeToken: string) {
+    const challenge = await authApi.checkLoginChallenge(challengeId, challengeToken);
+    if (challenge.accessToken) setUser(await authApi.me());
+    return challenge;
   }
 
   function logout() {
@@ -47,7 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, beginLogin, checkLoginChallenge, logout }}>
       {children}
     </AuthContext.Provider>
   );

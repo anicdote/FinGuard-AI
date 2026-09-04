@@ -28,6 +28,9 @@ async def init_db():
     await _db.cases.create_index("status")
     await _db.cases.create_index("priority")
     await _db.users.create_index("email", unique=True)
+    await _db.users.create_index("biometric_template_id", sparse=True)
+    await _db.biometric_challenges.create_index("challenge_id", unique=True)
+    await _db.biometric_challenges.create_index("expires_at", expireAfterSeconds=0)
     await _db.predictions.create_index("transaction_id")
     logger.info("MongoDB indexes ensured ✓")
 

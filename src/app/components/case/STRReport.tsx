@@ -1,12 +1,26 @@
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
-import { FileText, Download, Printer, CheckCircle, Clock } from "lucide-react";
+import { FileText, Download, Printer, CheckCircle, Clock, Fingerprint, Loader2 } from "lucide-react";
+import { caseApi } from "../../services/api";
 
 interface STRReportProps {
   narrative: string;
   caseData: any;
+  agentLog?: any[];
+  explanation?: string;
 }
 
-export function STRReport({ narrative, caseData }: STRReportProps) {
+function completedAgentCount(entries: any[] = []) {
+  return new Set(entries.map((entry) => String(entry?.agent ?? "").match(/^(?:Planner→)?Agent([1-6])(?:_|$)/)?.[1]).filter(Boolean)).size;
+}
+
+function reportDuration(entries: any[] = []) {
+  const times = entries.map((entry) => new Date(entry?.timestamp).getTime()).filter(Number.isFinite);
+  if (times.length < 2) return null;
+  return (Math.max(...times) - Math.min(...times)) / 1000;
+}
+
+export function STRReport({ narrative, caseData, agentLog, explanation }: STRReportProps) {
   const caseId     = caseData.id ?? caseData._id ?? "—";
   const priority   = caseData.priority ?? "medium";
   const riskScore  = Number(caseData.riskScore ?? caseData.risk_score ?? 0).toFixed(0);
@@ -18,21 +32,74 @@ export function STRReport({ narrative, caseData }: STRReportProps) {
   const strFilingStatus = recommendation.strFilingStatus ?? recommendation.str_filing_status ?? caseData.strFilingStatus ?? caseData.str_filing_status ?? "not_filed";
   const formatStatus = (value: string) => value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
   const processingTime = caseData.processingTime ?? caseData.processing_time ?? null;
-  const cleanNarrative = (narrative ?? "")
+  const canonicalAccountId = caseData.accountId ?? caseData.account_id;
+  const completedAgents = completedAgentCount(agentLog ?? caseData.agentLog ?? caseData.agent_log ?? []);
+  const measuredDuration = processingTime ?? reportDuration(agentLog ?? caseData.agentLog ?? caseData.agent_log ?? []);
+  let renderedNarrative = narrative ?? "";
+  // Existing drafts may predate the Agent 5 construction-order fix.  Repair
+  // only an empty DESCRIPTION using the separately persisted Agent 5 text.
+  if (explanation) {
+    renderedNarrative = renderedNarrative.replace(/^(DESCRIPTION:\s*\r?\n)(?=\s*[─-]{3,})/m, `$1${explanation}\n`);
+  }
+  if (canonicalAccountId) {
+    renderedNarrative = renderedNarrative.replace(/^(Account:\s*).+$/m, `$1${canonicalAccountId}`);
+  }
+  if (completedAgents) {
+    renderedNarrative = renderedNarrative.replace(/^(AGENTS RAN:\s*)\d+$/m, `$1${completedAgents}`);
+  }
+  const cleanNarrative = renderedNarrative
     .replace(/\n?APPROVED BY:.*(?:\n|$)/gi, "")
     .replace(/\n?Biometric verification: pending hardware integration.*(?:\n|$)/gi, "")
     .trim();
 
-  const handleDownload = () => {
-    const blob = new Blob([narrative], { type: "text/plain" });
-    const url  = URL.createObjectURL(blob);
+  const [downloadChallenge, setDownloadChallenge] = useState<any>(null);
+  const [downloadError, setDownloadError] = useState("");
+  const [downloading, setDownloading] = useState(false);
+
+  const saveDownload = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
     const a    = document.createElement("a");
     a.href     = url;
-    a.download = `STR_${caseId}_${new Date().toISOString().split("T")[0]}.txt`;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  };
+
+  useEffect(() => {
+    if (!downloadChallenge?.challengeId) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      try {
+        const next = await caseApi.checkStrDownloadChallenge(caseId, downloadChallenge.challengeId);
+        if (cancelled) return;
+        setDownloadChallenge(next);
+        if (next.status === "success") {
+          const file = await caseApi.downloadStr(caseId, next.challengeId);
+          if (!cancelled) { saveDownload(file.blob, file.filename); setDownloadChallenge(null); setDownloading(false); }
+          return;
+        }
+        if (["failed", "timeout", "hardware_error"].includes(next.status)) {
+          setDownloadError(next.message ?? "Biometric verification was not completed.");
+          setDownloading(false);
+          return;
+        }
+        timer = window.setTimeout(poll, 900);
+      } catch (err: any) {
+        if (!cancelled) { setDownloadError(err.message ?? "Unable to authorize STR download."); setDownloading(false); }
+      }
+    };
+    void poll();
+    return () => { cancelled = true; if (timer) window.clearTimeout(timer); };
+  }, [downloadChallenge?.challengeId, caseId]);
+
+  const handleDownload = async () => {
+    setDownloadError("");
+    setDownloading(true);
+    try { setDownloadChallenge(await caseApi.startStrDownloadChallenge(caseId)); }
+    catch (err: any) { setDownloadError(err.message ?? "Could not start biometric authorization."); setDownloading(false); }
   };
 
   const checklist = [
@@ -62,9 +129,10 @@ export function STRReport({ narrative, caseData }: STRReportProps) {
             <div className="flex items-center gap-2">
               <button
                 onClick={handleDownload}
+                disabled={downloading}
                 className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded border border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors"
               >
-                <Download className="w-3.5 h-3.5" /> Download
+                {downloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} Download
               </button>
               <button
                 onClick={() => window.print()}
@@ -80,6 +148,12 @@ export function STRReport({ narrative, caseData }: STRReportProps) {
               </button>
             </div>
           </div>
+          {(downloadChallenge || downloadError) && (
+            <div className="mt-3 text-xs rounded border p-3" style={{ background: "#F4F6F9", borderColor: "#D5DBE3" }}>
+              {downloadChallenge && <span className="flex items-center gap-2"><Fingerprint className="w-4 h-4" /> {downloadChallenge.message ?? "Place your registered finger on the local sensor."}</span>}
+              {downloadError && <span className="text-red-700">{downloadError}</span>}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -102,7 +176,7 @@ export function STRReport({ narrative, caseData }: STRReportProps) {
               className="text-xs font-medium px-2.5 py-1 rounded border"
               style={{ background: "#E9F7EF", color: "#1A7A4A", borderColor: "#A9DFBF" }}
             >
-              Regulatory Compliant
+              Compliance Review Draft
             </span>
           </div>
         </CardHeader>
@@ -156,10 +230,10 @@ export function STRReport({ narrative, caseData }: STRReportProps) {
             <div className="grid grid-cols-2 gap-3">
               {[
                 { label: "Generated By",    value: "FinGuard AI v2.1" },
-                { label: "Processing Time", value: processingTime != null ? `${processingTime}s` : "Not captured" },
+                { label: "Processing Time", value: measuredDuration != null ? `${Number(measuredDuration).toFixed(1)}s` : "Not captured" },
                 { label: "STR Filing",      value: formatStatus(strFilingStatus) },
                 { label: "Validation",      value: "✓ Passed"                 },
-                { label: "Characters",      value: narrative.length.toString() },
+                { label: "Characters",      value: cleanNarrative.length.toString() },
                 { label: "Case Priority",   value: priority.toUpperCase()     },
                 { label: "Risk Score",      value: `${riskScore}/100`         },
                 { label: "Typologies",      value: fatfTypes.length.toString() },

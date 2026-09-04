@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.db.session import init_db
-from app.api.routes import auth, transactions, cases, predictions, analytics, users
+from app.api.routes import auth, transactions, cases, predictions, analytics, users, hardware
 from app.workers.background import start_background_worker
 
 setup_logging()
@@ -48,6 +48,7 @@ app.include_router(cases.router,        prefix="/api/v1/cases",        tags=["Ca
 app.include_router(predictions.router,  prefix="/api/v1/predictions",  tags=["Predictions"])
 app.include_router(analytics.router,    prefix="/api/v1/analytics",    tags=["Analytics"])
 app.include_router(users.router,        prefix="/api/v1/users",        tags=["Users"])
+app.include_router(hardware.router,     prefix="/api/v1/hardware",     tags=["Hardware"])
 
 
 @app.get("/health", tags=["Health"])

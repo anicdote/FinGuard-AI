@@ -114,3 +114,20 @@ def test_model_disagreement_requires_human_review():
     assert rec["action"] == "ESCALATE"
     assert rec["requires_human_review"] is True
     assert any("model disagreement" in item.lower() for item in rec["decision_factors"])
+
+
+def test_equivalent_customer_identification_gaps_are_deduplicated():
+    rec = decision(context(
+        regulatory={
+            "missing_information": [
+                "Customer identification information is not available in the investigation context.",
+            ],
+        },
+    ))
+    customer_gaps = [
+        item for item in rec["missing_information"]
+        if "customer identification information" in item.lower()
+    ]
+    assert customer_gaps == [
+        "Customer identification information is not available in the investigation context.",
+    ]

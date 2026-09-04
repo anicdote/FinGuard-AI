@@ -97,7 +97,7 @@ async function tryRefresh(): Promise<boolean> {
 
 // ── Auth API ──────────────────────────────────────────────────────────────────
 export const authApi = {
-  async login(email: string, password: string) {
+  async beginLogin(email: string, password: string) {
     const form = new URLSearchParams({ username: email, password });
     const res  = await fetch(`${BASE_URL}/api/v1/auth/login`, {
       method: "POST",
@@ -108,10 +108,19 @@ export const authApi = {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail ?? "Login failed");
     }
-    const data = await res.json();
-    tokenStore.set(data.access_token, data.refresh_token);
+    return normalizeDates(await res.json());
+  },
+
+  async checkLoginChallenge(challengeId: string, challengeToken: string) {
+    const data = await apiFetch<any>(`/api/v1/auth/biometric-challenges/${encodeURIComponent(challengeId)}`, {
+      headers: { "X-Biometric-Challenge-Token": challengeToken },
+    });
+    if (data.accessToken && data.refreshToken) tokenStore.set(data.accessToken, data.refreshToken);
     return data;
   },
+
+  // Compatibility name; it intentionally does not authenticate until polling succeeds.
+  login(email: string, password: string) { return this.beginLogin(email, password); },
 
   logout() {
     tokenStore.clear();
@@ -171,6 +180,23 @@ export const caseApi = {
     apiFetch<any>("/api/v1/cases/false-positive-stats"),
   audit: (id: string, limit = 100) =>
     apiFetch<any[]>(`/api/v1/cases/${id}/audit?limit=${limit}`),
+  startStrDownloadChallenge: (id: string) =>
+    apiFetch<any>(`/api/v1/cases/${id}/str/download-challenge`, { method: "POST" }),
+  checkStrDownloadChallenge: (caseId: string, challengeId: string) =>
+    apiFetch<any>(`/api/v1/cases/${caseId}/str/download-challenge/${encodeURIComponent(challengeId)}`),
+  async downloadStr(caseId: string, challengeId: string) {
+    const response = await fetch(`${BASE_URL}/api/v1/cases/${caseId}/str/download?challenge_id=${encodeURIComponent(challengeId)}`, {
+      headers: tokenStore.access ? { Authorization: `Bearer ${tokenStore.access}` } : {},
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: response.statusText }));
+      throw new Error(error.detail ?? "STR download failed");
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get("Content-Disposition") ?? "";
+    const filename = disposition.match(/filename="?([^";]+)"?/)?.[1] ?? `STR_${caseId}.txt`;
+    return { blob, filename };
+  },
 };
 
 // ── Users API (Phase 8 — case assignment) ──────────────────────────────────────

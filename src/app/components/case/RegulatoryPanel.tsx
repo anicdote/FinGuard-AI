@@ -24,12 +24,13 @@ export function RegulatoryPanel({ regulatory }: RegulatoryPanelProps) {
               <CardDescription>FATF typology mapping &amp; PMLA 2002 citations</CardDescription>
             </div>
             <div className="flex gap-2">
-              {fiuReportable && <Badge variant="destructive">FIU-IND Reportable</Badge>}
-              {strRequired && <Badge className="bg-[#C0392B] text-white">STR Required</Badge>}
+              {fiuReportable && <Badge variant="destructive">FIU-IND Review Recommended</Badge>}
+              {strRequired && <Badge className="bg-[#C0392B] text-white">STR Review Recommended</Badge>}
             </div>
           </div>
         </CardHeader>
         <CardContent>
+          {(fiuReportable || strRequired) && <p className="text-xs text-slate-500 mb-4">AI recommends review; a compliance officer makes the final decision. No STR has been filed.</p>}
           {typologies.length === 0 ? (
             <p className="text-sm text-slate-400 py-4 text-center">
               Regulatory assessment was not run for this case — risk was below the planner's

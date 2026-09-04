@@ -108,6 +108,7 @@ export function EvidencePanel({ evidence, watchlistHits }: EvidencePanelProps) {
             </div>
           ) : (
             <div className="space-y-3">
+              <p className="text-xs text-slate-500">Demo/Internal Watchlist</p>
               {hits.map((hit, idx) => (
                 <div key={idx} className="flex items-start gap-3 p-4 bg-red-50 border border-red-300 rounded-lg">
                   <ShieldAlert className="w-5 h-5 text-red-700 flex-shrink-0 mt-0.5" />

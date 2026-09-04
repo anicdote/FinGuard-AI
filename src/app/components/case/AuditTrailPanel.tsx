@@ -20,6 +20,12 @@ function formatTime(value: any) {
   });
 }
 
+function formatMetadata(metadata: Record<string, any>) {
+  const entries = Object.entries(metadata).filter(([, value]) => value !== undefined && value !== null && value !== "");
+  if (!entries.length) return "No additional details recorded.";
+  return entries.map(([key, value]) => `${formatAction(key)}: ${typeof value === "object" ? JSON.stringify(value) : String(value)}`).join("\n");
+}
+
 export function AuditTrailPanel({ caseId }: { caseId: string }) {
   const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -87,18 +93,16 @@ export function AuditTrailPanel({ caseId }: { caseId: string }) {
                       </span>
                       {actor.role && <span>Role: {actor.role}</span>}
                     </div>
-                    {Object.keys(metadata).length > 0 && (
-                      <details className="mt-2">
-                        <summary className="cursor-pointer text-xs font-medium text-slate-600">
-                          <span className="inline-flex items-center gap-1">
-                            <FileText className="w-3 h-3" /> Event details
-                          </span>
-                        </summary>
-                        <pre className="mt-2 overflow-auto rounded bg-slate-50 p-2 text-[11px] leading-5 text-slate-600">
-                          {JSON.stringify(metadata, null, 2)}
-                        </pre>
-                      </details>
-                    )}
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-xs font-medium text-slate-600">
+                        <span className="inline-flex items-center gap-1">
+                          <FileText className="w-3 h-3" /> Event details
+                        </span>
+                      </summary>
+                      <pre className="mt-2 overflow-auto rounded bg-slate-50 p-2 text-[11px] leading-5 text-slate-600 whitespace-pre-wrap">
+                        {formatMetadata(metadata)}
+                      </pre>
+                    </details>
                   </div>
                 </div>
               );

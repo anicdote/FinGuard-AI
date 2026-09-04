@@ -1,23 +1,47 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { Shield, Lock, Mail, AlertCircle } from "lucide-react";
+import { Shield, Lock, Mail, AlertCircle, Fingerprint, Loader2 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
 export function LoginPage() {
-  const { login }   = useAuth();
+  const { beginLogin, checkLoginChallenge } = useAuth();
   const navigate    = useNavigate();
   const [email,     setEmail]    = useState("admin@finguard.ai");
   const [password,  setPassword] = useState("Admin@1234");
   const [error,     setError]    = useState("");
   const [loading,   setLoading]  = useState(false);
+  const [challenge, setChallenge] = useState<any>(null);
+
+  useEffect(() => {
+    if (!challenge?.challengeId || !challenge?.challengeToken) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      try {
+        const next = await checkLoginChallenge(challenge.challengeId, challenge.challengeToken);
+        if (cancelled) return;
+        setChallenge(next);
+        if (next.accessToken) { navigate("/"); return; }
+        if (["failed", "timeout", "hardware_error"].includes(next.status)) {
+          setError(next.message ?? "Biometric verification was not completed.");
+          setLoading(false);
+          return;
+        }
+        timer = window.setTimeout(poll, 900);
+      } catch (err: any) {
+        if (!cancelled) { setError(err.message ?? "Unable to read biometric verification status."); setLoading(false); }
+      }
+    };
+    void poll();
+    return () => { cancelled = true; if (timer) window.clearTimeout(timer); };
+  }, [challenge?.challengeId, checkLoginChallenge, navigate]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setLoading(true);
     try {
-      await login(email, password);
-      navigate("/");
+      setChallenge(await beginLogin(email, password));
     } catch (err: any) {
       setError(err.message ?? "Login failed");
     } finally {
@@ -46,7 +70,13 @@ export function LoginPage() {
         {/* Card */}
         <div className="rounded-2xl p-8 shadow-2xl"
              style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", backdropFilter: "blur(12px)" }}>
-          <form onSubmit={handleSubmit} className="space-y-5">
+          {challenge && error && (
+            <div className="flex items-center gap-2 p-3 rounded-lg text-sm mb-5"
+                 style={{ background: "rgba(192,57,43,0.2)", color: "#F1948A", border: "1px solid rgba(192,57,43,0.4)" }}>
+              <AlertCircle className="w-4 h-4 shrink-0" /> {error}
+            </div>
+          )}
+          {!challenge ? <form onSubmit={handleSubmit} className="space-y-5">
             {error && (
               <div className="flex items-center gap-2 p-3 rounded-lg text-sm"
                    style={{ background: "rgba(192,57,43,0.2)", color: "#F1948A", border: "1px solid rgba(192,57,43,0.4)" }}>
@@ -107,7 +137,19 @@ export function LoginPage() {
             >
               {loading ? "Signing in…" : "Sign In"}
             </button>
-          </form>
+          </form> : (
+            <div className="text-center py-4">
+              <Fingerprint className="w-10 h-10 text-white mx-auto mb-4" />
+              <h2 className="text-lg font-semibold text-white">Fingerprint Verification</h2>
+              <p className="text-sm mt-2" style={{ color: "#93B4D4" }}>
+                {challenge.message ?? "Place your registered finger on the local sensor."}
+              </p>
+              <div className="flex justify-center gap-2 mt-5 text-xs" style={{ color: "#93B4D4" }}>
+                <Loader2 className="w-4 h-4 animate-spin" /> Waiting for fingerprint…
+              </div>
+              {error && <button type="button" onClick={() => { setChallenge(null); setError(""); setLoading(false); }} className="w-full mt-6 py-2.5 rounded-lg text-sm font-semibold text-white" style={{ background: "#1A7A4A" }}>Try Again</button>}
+            </div>
+          )}
 
           <p className="text-center text-xs mt-6" style={{ color: "#93B4D4" }}>
             Demo credentials pre-filled above

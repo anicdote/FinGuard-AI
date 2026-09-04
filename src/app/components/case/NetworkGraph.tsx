@@ -54,7 +54,7 @@ export function NetworkGraph({ networkData, accountName }: NetworkGraphProps) {
         <div className="flex items-center justify-between">
           <div>
             <CardTitle>Network Investigation (Agent 3)</CardTitle>
-            <CardDescription>2-hop account graph &amp; PageRank centrality</CardDescription>
+            <CardDescription>Transaction network &amp; PageRank centrality</CardDescription>
           </div>
           <Badge variant="outline">
             <Network className="w-3 h-3 mr-1" />

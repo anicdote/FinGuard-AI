@@ -25,6 +25,18 @@ class Settings(BaseSettings):
     FRAUD_THRESHOLD: float = 0.65          # Probability above which a txn is flagged
     BATCH_ANALYSIS_INTERVAL_SEC: int = 30  # Background worker polling interval
 
+    # Local Arduino biometric controller. Cloud hosts cannot access a USB
+    # controller attached to an operator workstation; enable this only where
+    # the API process can reach the physical serial device.
+    HARDWARE_ENABLED: bool = False
+    ARDUINO_SERIAL_PORT: str = "COM3"
+    ARDUINO_BAUD_RATE: int = 115200
+    ARDUINO_CONNECT_TIMEOUT_SEC: float = 2.0
+    ARDUINO_RESET_DELAY_SEC: float = 2.0
+    FINGERPRINT_VERIFY_TIMEOUT_SEC: int = 30
+    BIOMETRIC_CHALLENGE_TTL_SEC: int = 90
+    LCD_DISPLAY_TIMEOUT_SEC: float = 4.0
+
     # ── CORS ──────────────────────────────────────────────────────────────
     CORS_ORIGINS: List[str] = [
         "http://localhost:5173",   # Vite dev

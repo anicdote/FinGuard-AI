@@ -1,6 +1,6 @@
 """Auth routes — register, login, refresh token."""
 
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, Header, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
 
@@ -11,6 +11,9 @@ from app.core.security import (
 )
 from app.db.session import get_db
 from app.db.repositories.user_repo import UserRepository
+from app.schemas.biometric import BiometricChallengeResponse
+from app.services.hardware.biometric_workflow import biometric_workflow
+from app.services.hardware.fingerprint import HardwareBusyError, HardwareUnavailableError
 
 router = APIRouter()
 
@@ -47,7 +50,7 @@ async def register(req: RegisterRequest):
     return user
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=BiometricChallengeResponse, status_code=status.HTTP_202_ACCEPTED)
 async def login(form: OAuth2PasswordRequestForm = Depends()):
     db   = await get_db()
     repo = UserRepository(db)
@@ -60,11 +63,24 @@ async def login(form: OAuth2PasswordRequestForm = Depends()):
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    token_data = {"sub": user["_id"], "role": user["role"], "email": user["email"]}
-    return TokenResponse(
-        access_token=create_access_token(token_data),
-        refresh_token=create_refresh_token(token_data),
-    )
+    try:
+        challenge = await biometric_workflow.start_login(user, db)
+    except HardwareBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except HardwareUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return biometric_workflow.response(challenge)
+
+
+@router.get("/biometric-challenges/{challenge_id}", response_model=BiometricChallengeResponse)
+async def complete_biometric_login(
+    challenge_id: str,
+    challenge_token: str = Header(..., alias="X-Biometric-Challenge-Token", min_length=1),
+):
+    try:
+        return await biometric_workflow.login_challenge_response(challenge_id, challenge_token, await get_db())
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -83,4 +99,6 @@ async def refresh(refresh_token: str):
 @router.get("/me")
 async def me(current_user=Depends(get_current_user)):
     current_user.pop("hashed_password", None)
+    current_user.pop("biometric_template_id", None)
+    current_user.pop("biometric_enrolled_at", None)
     return current_user

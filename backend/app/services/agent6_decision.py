@@ -527,6 +527,17 @@ class Agent6Recommend:
     def _dedupe(values: List[str]) -> List[str]:
         result: List[str] = []
         for value in values:
-            if value not in result:
+            # Regulatory and context checks can express the same missing fact
+            # with minor wording differences.  Keep the first (usually more
+            # specific) statement while preserving genuinely distinct facts.
+            normalized = " ".join(value.lower().replace("not available", "unavailable").split())
+            if not any(
+                normalized == " ".join(existing.lower().replace("not available", "unavailable").split())
+                or (
+                    "customer identification information" in normalized
+                    and "customer identification information" in existing.lower()
+                )
+                for existing in result
+            ):
                 result.append(value)
         return result

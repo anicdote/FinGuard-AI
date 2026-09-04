@@ -2031,10 +2031,14 @@ class Agent5Explanation:
             f"{ctx.transaction_id}"
         )
 
-        ctx.set_explanation(
-            self._build_explanation(ctx),
-            self._build_str(ctx),
-        )
+        # Build the explanation first.  `_build_str` deliberately embeds the
+        # Agent 5 explanation in its DESCRIPTION section, so evaluating both
+        # arguments in a single `set_explanation` call would otherwise use the
+        # still-empty context value.
+        explanation = self._build_explanation(ctx)
+        ctx.explanation = explanation
+        str_draft = self._build_str(ctx)
+        ctx.set_explanation(explanation, str_draft)
 
         return ctx
 
@@ -2156,7 +2160,7 @@ class Agent5Explanation:
         return f"""SUSPICIOUS TRANSACTION REPORT (STR)
 FIU-IND | Date: {now} | Ref: STR-{ctx.transaction_id}
 {'─'*60}
-Account:      {txn.get('accountId', txn.get('id', 'Unknown'))}
+Account:      {txn.get('account_id', txn.get('accountId', 'Unknown'))}
 Amount:       ₹{float(txn.get('amount', 0)):,.2f}
 Channel:      {txn.get('channel', 'Unknown')}
 Counterparty: {txn.get('counterparty', txn.get('nameDest', 'Unknown'))}
@@ -2169,11 +2173,32 @@ TYPOLOGY:     {pt['name']} ({pt['code']})
 PMLA 2002:    {', '.join(pmla) if pmla else 'Section 3'}
 NETWORK:      {ctx.network.get('node_count', 0)} accounts | {len(ctx.sub_cases)} sub-cases
 WATCHLIST:    {len(ctx.watchlist_hits)} hit(s)
-AGENTS RAN:   {len(ctx.agents_completed)}
+AGENTS RAN:   {self._completed_agent_count(ctx)}
 {'─'*60}
 ACTION:       {ctx.recommendation.get('action', 'Pending')}
 APPROVED BY:  [Pending biometric verification]
 Prepared by FinGuard AI Autonomous Investigation System""".strip()
+
+    @staticmethod
+    def _completed_agent_count(ctx: InvestigationContext) -> int:
+        """Count investigation agents, not planner trace records.
+
+        Agent 5 runs before Agent 6, so its persisted draft truthfully records
+        the agents that had completed at generation time.  The STR UI derives
+        the final count from the persisted trace once Agent 6 has completed.
+        """
+        agent_ids = set()
+        for entry in ctx.agent_log:
+            agent = str(entry.get("agent", "")) if isinstance(entry, dict) else ""
+            if agent.startswith("Planner→Agent"):
+                number = agent.split("Planner→Agent", 1)[1].split("_", 1)[0]
+            elif agent.startswith("Agent"):
+                number = agent[5:].split("_", 1)[0]
+            else:
+                number = ""
+            if number in {"1", "2", "3", "4", "5", "6"}:
+                agent_ids.add(number)
+        return len(agent_ids)
 
 
 # ══ AGENT 6 — Action Recommendation ═══════════════════════════════════════════
