@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import {
   ArrowLeft, AlertTriangle, Calendar, Clock, TrendingUp,
   CheckCircle, Loader2, Sparkles, ShieldAlert, UserCog,
+  Info, ListChecks, Network, Eye, FileText, ShieldCheck,
 } from "lucide-react";
 import { NetworkGraph } from "../components/case/NetworkGraph";
 import { TransactionTimeline } from "../components/case/TransactionTimeline";
@@ -20,6 +21,128 @@ import { AgentTracePanel } from "../components/case/AgentTracePanel";
 import { SubCasesPanel } from "../components/case/SubCasesPanel";
 import { AuditTrailPanel } from "../components/case/AuditTrailPanel";
 import type { CaseData, Recommendation } from "../types/investigation";
+
+type Agent5Explanation = {
+  transactionId?: string;
+  riskLevel?: string;
+  riskPercent?: number;
+  keyDrivers: Array<{ feature: string; value: string; positive: boolean }>;
+  patterns: string[];
+  network?: string;
+  watchlist: string[];
+  typologyName?: string;
+  typologyCode?: string;
+  typologyConfidence?: number;
+  pmla?: string;
+  fallback?: string;
+};
+
+function titleCase(value: string): string {
+  return value
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function parseAgent5Explanation(text: string): Agent5Explanation {
+  const result: Agent5Explanation = {
+    keyDrivers: [],
+    patterns: [],
+    watchlist: [],
+  };
+
+  const riskMatch = text.match(
+    /^Transaction\s+(.+?)\s+flagged with\s+([A-Za-z]+)\s+risk\s+\(([\d.]+)%\)\./i
+  );
+
+  if (riskMatch) {
+    result.transactionId = riskMatch[1].trim();
+    result.riskLevel = riskMatch[2].toUpperCase();
+    result.riskPercent = Number(riskMatch[3]);
+  }
+
+  const driverMatch = text.match(
+    /Key drivers:\s*(.*?)(?:\.\s*Patterns:|$)/i
+  );
+  if (driverMatch) {
+    result.keyDrivers = driverMatch[1]
+      .split(/,\s*/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .map((item) => {
+        const match = item.match(
+          /^(.+?):\s*([↑↓])\s*([\d.]+)$/
+        );
+        if (!match) {
+          return {
+            feature: titleCase(item),
+            value: "",
+            positive: false,
+          };
+        }
+        return {
+          feature: titleCase(match[1]),
+          value: `${match[2]}${match[3]}`,
+          positive: match[2] === "↑",
+        };
+      });
+  }
+
+  const patternsMatch = text.match(
+    /Patterns:\s*(.*?)(?:\.\s*Network:|\.\s*Watchlist:|\.\s*Typology:|$)/i
+  );
+  if (patternsMatch) {
+    result.patterns = patternsMatch[1]
+      .split(/,\s*/)
+      .map((item) => titleCase(item.trim()))
+      .filter(Boolean);
+  }
+
+  const networkMatch = text.match(
+    /Network:\s*(.*?)(?:\.\s*Watchlist:|\.\s*Typology:|$)/i
+  );
+  if (networkMatch) {
+    result.network = networkMatch[1].trim();
+  }
+
+  const watchlistMatch = text.match(
+    /Watchlist:\s*(.*?)(?:\.\s*Typology:|$)/i
+  );
+  if (watchlistMatch) {
+    result.watchlist = watchlistMatch[1]
+      .split(/,\s*/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  const typologyMatch = text.match(
+    /Typology:\s*(.*?)\s*\(([^)]+)\)\s*[—-]\s*([\d.]+)%\s*confidence\./i
+  );
+  if (typologyMatch) {
+    result.typologyName = typologyMatch[1].trim();
+    result.typologyCode = typologyMatch[2].trim();
+    result.typologyConfidence = Number(typologyMatch[3]);
+  }
+
+  const pmlaMatch = text.match(/PMLA:\s*(.*?)(?:\.|$)/i);
+  if (pmlaMatch) {
+    result.pmla = pmlaMatch[1].trim();
+  }
+
+  const hasStructuredData =
+    !!result.transactionId ||
+    result.keyDrivers.length > 0 ||
+    result.patterns.length > 0 ||
+    !!result.network ||
+    result.watchlist.length > 0 ||
+    !!result.typologyName ||
+    !!result.pmla;
+
+  if (!hasStructuredData) {
+    result.fallback = text;
+  }
+
+  return result;
+}
 
 // Safe date helper — works whether value is a Date object or an ISO string
 function safeDate(val: any): Date {
@@ -236,8 +359,8 @@ export function CaseDetail() {
   async function handleMarkReviewed() {
     setUpdating(true);
     try {
-      await caseApi.updateStatus(caseId!, "reviewing");
-      setStatusMsg("Status updated to Reviewing");
+      await caseApi.updateStatus(caseId!, "reviewed");
+      setStatusMsg("STR marked as reviewed");
       refetch();
     } catch (e: any) {
       setStatusMsg(e.message ?? "Update failed");
@@ -329,7 +452,7 @@ export function CaseDetail() {
             className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded border border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-50"
           >
             {updating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
-            Start Review
+            Mark STR Reviewed
           </button>
         </div>
       </div>
@@ -521,17 +644,222 @@ export function CaseDetail() {
         </div>
       )}
 
-      {/* Plain-language explanation (Agent 5) */}
-      {explanation && (
-        <Card className="mb-6 border-2" style={{ borderColor: "#C6D3E8" }}>
-          <CardContent className="pt-5">
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-              AI Explanation (Agent 5)
-            </p>
-            <p className="text-sm text-slate-800 leading-relaxed">{explanation}</p>
-          </CardContent>
-        </Card>
-      )}
+      {/* Structured AI explanation (Agent 5) */}
+      {explanation && (() => {
+        const parsed = parseAgent5Explanation(explanation);
+        const riskColor =
+          parsed.riskLevel === "CRITICAL" || parsed.riskLevel === "HIGH"
+            ? "#C0392B"
+            : parsed.riskLevel === "MEDIUM"
+              ? "#B7791F"
+              : "#1A7A4A";
+
+        return (
+          <Card className="mb-6 border border-slate-200 shadow-sm overflow-hidden">
+            <CardHeader className="px-5 py-4 border-b border-slate-100">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
+                    <Info className="w-4 h-4 text-slate-600" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-sm font-semibold text-slate-800">
+                      AI Investigation Explanation
+                    </CardTitle>
+                    <CardDescription className="text-xs mt-0.5">
+                      Agent 5 · Evidence synthesis and model explanation
+                    </CardDescription>
+                  </div>
+                </div>
+
+                {parsed.riskLevel && (
+                  <div className="text-right shrink-0">
+                    <span
+                      className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide"
+                      style={{
+                        color: riskColor,
+                        background:
+                          riskColor === "#C0392B" ? "#FDECEA" :
+                          riskColor === "#B7791F" ? "#FEF3C7" : "#E9F7EF",
+                      }}
+                    >
+                      {parsed.riskLevel} RISK
+                    </span>
+                    {typeof parsed.riskPercent === "number" && (
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        {parsed.riskPercent.toFixed(1)}% model probability
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </CardHeader>
+
+            <CardContent className="px-5 py-5">
+              {parsed.fallback ? (
+                <div className="rounded-lg bg-slate-50 border border-slate-100 px-4 py-3">
+                  <p className="text-xs text-slate-700 leading-relaxed">
+                    {parsed.fallback}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  {parsed.transactionId && (
+                    <div className="rounded-lg bg-slate-50 border border-slate-100 px-3.5 py-3">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                        Investigated transaction
+                      </p>
+                      <p className="text-xs font-semibold text-slate-700 mt-1 font-mono break-all">
+                        {parsed.transactionId}
+                      </p>
+                    </div>
+                  )}
+
+                  {parsed.keyDrivers.length > 0 && (
+                    <div>
+                      <div className="flex items-center gap-2 mb-2.5">
+                        <TrendingUp className="w-3.5 h-3.5 text-slate-500" />
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                          Key model drivers
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        {parsed.keyDrivers.map((driver) => (
+                          <div
+                            key={driver.feature}
+                            className="rounded-lg border px-3 py-2.5"
+                            style={{
+                              background: driver.positive ? "#FEF2F2" : "#F0FDF4",
+                              borderColor: driver.positive ? "#FECACA" : "#BBF7D0",
+                            }}
+                          >
+                            <p className="text-[10px] font-medium text-slate-500">
+                              {driver.feature}
+                            </p>
+                            <p
+                              className="text-sm font-bold mt-1"
+                              style={{ color: driver.positive ? "#B42318" : "#15803D" }}
+                            >
+                              {driver.value}
+                            </p>
+                            <p
+                              className="text-[10px] mt-0.5"
+                              style={{ color: driver.positive ? "#B42318" : "#15803D" }}
+                            >
+                              {driver.positive ? "Increases risk" : "Decreases risk"}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {parsed.patterns.length > 0 && (
+                    <div>
+                      <div className="flex items-center gap-2 mb-2.5">
+                        <ListChecks className="w-3.5 h-3.5 text-slate-500" />
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                          Detected patterns
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {parsed.patterns.map((pattern) => (
+                          <span
+                            key={pattern}
+                            className="px-2.5 py-1.5 rounded-md bg-slate-50 border border-slate-200 text-[11px] font-medium text-slate-700"
+                          >
+                            {pattern}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {(parsed.network || parsed.watchlist.length > 0) && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {parsed.network && (
+                        <div className="rounded-lg border border-slate-200 bg-white px-3.5 py-3">
+                          <div className="flex items-center gap-2">
+                            <Network className="w-3.5 h-3.5 text-slate-500" />
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                              Network findings
+                            </p>
+                          </div>
+                          <p className="text-xs font-medium text-slate-700 mt-1.5">
+                            {parsed.network}
+                          </p>
+                        </div>
+                      )}
+
+                      {parsed.watchlist.length > 0 && (
+                        <div className="rounded-lg border border-red-100 bg-red-50 px-3.5 py-3">
+                          <div className="flex items-center gap-2">
+                            <Eye className="w-3.5 h-3.5 text-red-600" />
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-red-500">
+                              Watchlist hit
+                            </p>
+                          </div>
+                          <div className="mt-1.5 space-y-1">
+                            {parsed.watchlist.map((entity) => (
+                              <p key={entity} className="text-xs font-semibold text-red-800">
+                                {entity}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {(parsed.typologyName || parsed.pmla) && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {parsed.typologyName && (
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2">
+                              <FileText className="w-3.5 h-3.5 text-slate-500" />
+                              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                                FATF typology
+                              </p>
+                            </div>
+                            {parsed.typologyCode && (
+                              <span className="px-2 py-0.5 rounded bg-white border border-slate-200 text-[10px] font-bold text-slate-600">
+                                {parsed.typologyCode}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs font-semibold text-slate-700 mt-1.5">
+                            {parsed.typologyName}
+                          </p>
+                          {typeof parsed.typologyConfidence === "number" && (
+                            <p className="text-[10px] text-slate-500 mt-1">
+                              {parsed.typologyConfidence.toFixed(1)}% confidence
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {parsed.pmla && (
+                        <div className="rounded-lg border border-blue-100 bg-blue-50 px-3.5 py-3">
+                          <div className="flex items-center gap-2">
+                            <ShieldCheck className="w-3.5 h-3.5 text-blue-700" />
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-blue-600">
+                              Regulatory reference
+                            </p>
+                          </div>
+                          <p className="text-xs font-semibold text-blue-900 mt-1.5">
+                            PMLA · {parsed.pmla}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {/* Quick stat cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">

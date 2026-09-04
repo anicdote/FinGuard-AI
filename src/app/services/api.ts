@@ -1,50 +1,113 @@
 /**
  * FinGuard AI — API Client
- * Handles JWT auth, auto-refresh, and normalises backend responses
- * (snake_case → camelCase, ISO strings → Date objects).
+ *
+ * Handles:
+ * - Password authentication
+ * - Biometric login challenge creation/polling
+ * - JWT storage
+ * - Automatic token refresh
+ * - Backend snake_case → frontend camelCase conversion
+ * - Existing transaction/case/user/analytics/prediction APIs
  */
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+const BASE_URL = "http://localhost:8000";
 
-// ── Token storage ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Token storage
+// ─────────────────────────────────────────────────────────────────────────────
+
 export const tokenStore = {
-  get access(): string | null  { return localStorage.getItem("fg_access"); },
-  get refresh(): string | null { return localStorage.getItem("fg_refresh"); },
+  get access(): string | null {
+    return localStorage.getItem("fg_access");
+  },
+
+  get refresh(): string | null {
+    return localStorage.getItem("fg_refresh");
+  },
+
   set(access: string, refresh: string) {
-    localStorage.setItem("fg_access",  access);
+    localStorage.setItem("fg_access", access);
     localStorage.setItem("fg_refresh", refresh);
   },
+
   clear() {
     localStorage.removeItem("fg_access");
     localStorage.removeItem("fg_refresh");
   },
 };
 
-// ── snake_case → camelCase deep converter ─────────────────────────────────────
-function toCamel(s: string): string {
-  return s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+// ─────────────────────────────────────────────────────────────────────────────
+// Biometric challenge token storage
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The login POST returns a short-lived challenge_token.
+// Keep it in memory only. It is NOT a JWT.
+//
+// If your backend version does not require this header, sending it is harmless.
+// If the backend does require it, this prevents the previous 422 error.
+// ─────────────────────────────────────────────────────────────────────────────
+
+let biometricChallengeToken: string | null = null;
+
+function setBiometricChallengeToken(token?: string | null) {
+  biometricChallengeToken = token ?? null;
+}
+
+function clearBiometricChallengeToken() {
+  biometricChallengeToken = null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// snake_case → camelCase + ISO dates
+// ─────────────────────────────────────────────────────────────────────────────
+
+function toCamel(value: string): string {
+  return value.replace(
+    /_([a-z])/g,
+    (_, character) => character.toUpperCase(),
+  );
 }
 
 function normalizeDates(obj: any): any {
-  if (obj === null || obj === undefined) return obj;
-  if (typeof obj === "string") {
-    // Convert ISO datetime strings to Date objects
-    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(obj)) return new Date(obj);
+  if (obj === null || obj === undefined) {
     return obj;
   }
-  if (obj instanceof Date) return obj;
-  if (Array.isArray(obj)) return obj.map(normalizeDates);
-  if (typeof obj === "object") {
-    const out: any = {};
-    for (const [k, v] of Object.entries(obj)) {
-      out[toCamel(k)] = normalizeDates(v);
+
+  if (typeof obj === "string") {
+    if (
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(obj)
+    ) {
+      return new Date(obj);
     }
-    return out;
+
+    return obj;
   }
+
+  if (obj instanceof Date) {
+    return obj;
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(normalizeDates);
+  }
+
+  if (typeof obj === "object") {
+    const output: any = {};
+
+    for (const [key, value] of Object.entries(obj)) {
+      output[toCamel(key)] = normalizeDates(value);
+    }
+
+    return output;
+  }
+
   return obj;
 }
 
-// ── Core fetch wrapper ────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Core API fetch wrapper
+// ─────────────────────────────────────────────────────────────────────────────
+
 async function apiFetch<T>(
   path: string,
   options: RequestInit = {},
@@ -56,162 +119,483 @@ async function apiFetch<T>(
   };
 
   if (tokenStore.access) {
-    headers["Authorization"] = `Bearer ${tokenStore.access}`;
+    headers["Authorization"] =
+      `Bearer ${tokenStore.access}`;
   }
 
-  const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+  const response = await fetch(
+    `${BASE_URL}${path}`,
+    {
+      ...options,
+      headers,
+    },
+  );
 
-  // Auto-refresh on 401
-  if (res.status === 401 && retry && tokenStore.refresh) {
+  // ─────────────────────────────────────────────────────────────────────────
+  // Automatic JWT refresh
+  // ─────────────────────────────────────────────────────────────────────────
+
+  if (
+    response.status === 401 &&
+    retry &&
+    tokenStore.refresh
+  ) {
     const refreshed = await tryRefresh();
-    if (refreshed) return apiFetch<T>(path, options, false);
+
+    if (refreshed) {
+      return apiFetch<T>(
+        path,
+        options,
+        false,
+      );
+    }
+
     tokenStore.clear();
-    window.location.href = "/login";
+
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
+    }
+
     throw new Error("Session expired");
   }
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail ?? "API error");
+  if (!response.ok) {
+    const error = await response
+      .json()
+      .catch(() => ({
+        detail: response.statusText,
+      }));
+
+    throw new Error(
+      error.detail ?? "API error",
+    );
   }
 
-  const raw = await res.json();
-  // Normalize all responses: snake_case keys → camelCase, ISO strings → Dates
+  const raw = await response.json();
+
   return normalizeDates(raw) as T;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// JWT refresh
+// ─────────────────────────────────────────────────────────────────────────────
+
 async function tryRefresh(): Promise<boolean> {
+  if (!tokenStore.refresh) {
+    return false;
+  }
+
   try {
-    const res = await fetch(
-      `${BASE_URL}/api/v1/auth/refresh?refresh_token=${tokenStore.refresh}`,
-      { method: "POST" },
+    const response = await fetch(
+      `${BASE_URL}/api/v1/auth/refresh?refresh_token=${encodeURIComponent(
+        tokenStore.refresh,
+      )}`,
+      {
+        method: "POST",
+      },
     );
-    if (!res.ok) return false;
-    const data = await res.json();
-    tokenStore.set(data.access_token, data.refresh_token);
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const data = await response.json();
+
+    tokenStore.set(
+      data.access_token,
+      data.refresh_token,
+    );
+
     return true;
   } catch {
     return false;
   }
 }
 
-// ── Auth API ──────────────────────────────────────────────────────────────────
-export const authApi = {
-  async beginLogin(email: string, password: string) {
-    const form = new URLSearchParams({ username: email, password });
-    const res  = await fetch(`${BASE_URL}/api/v1/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: form,
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail ?? "Login failed");
-    }
-    return normalizeDates(await res.json());
-  },
+// ─────────────────────────────────────────────────────────────────────────────
+// Authentication API
+// ─────────────────────────────────────────────────────────────────────────────
 
-  async checkLoginChallenge(challengeId: string, challengeToken: string) {
-    const data = await apiFetch<any>(`/api/v1/auth/biometric-challenges/${encodeURIComponent(challengeId)}`, {
-      headers: { "X-Biometric-Challenge-Token": challengeToken },
-    });
-    if (data.accessToken && data.refreshToken) tokenStore.set(data.accessToken, data.refreshToken);
+export const authApi = {
+  /**
+   * Start password + biometric authentication.
+   *
+   * Password is verified by the backend.
+   * The backend then starts the local fingerprint challenge.
+   *
+   * IMPORTANT:
+   * This function does NOT store JWTs because the backend does not
+   * issue JWTs until the fingerprint succeeds.
+   */
+  async beginLogin(
+    email: string,
+    password: string,
+  ) {
+    clearBiometricChallengeToken();
+
+    const form = new URLSearchParams();
+
+    form.set("username", email);
+    form.set("password", password);
+
+    const response = await fetch(
+      `${BASE_URL}/api/v1/auth/login`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/x-www-form-urlencoded",
+        },
+        body: form,
+      },
+    );
+
+    if (!response.ok) {
+      const error = await response
+        .json()
+        .catch(() => ({}));
+
+      throw new Error(
+        error.detail ?? "Login failed",
+      );
+    }
+
+    const raw = await response.json();
+
+    const data = normalizeDates(raw);
+
+    // Backend may return challenge_token.
+    if (data.challengeToken) {
+      setBiometricChallengeToken(
+        data.challengeToken,
+      );
+    }
+
     return data;
   },
 
-  // Compatibility name; it intentionally does not authenticate until polling succeeds.
-  login(email: string, password: string) { return this.beginLogin(email, password); },
+  /**
+   * Backwards-compatible login alias.
+   */
+  async login(
+    email: string,
+    password: string,
+  ) {
+    return this.beginLogin(
+      email,
+      password,
+    );
+  },
+
+  /**
+   * Poll the server-side biometric challenge.
+   *
+   * The browser does NOT talk to Arduino.
+   * It only asks the backend for the current challenge state.
+   */
+  async checkLoginChallenge(
+    challengeId: string,
+  ) {
+    const headers: Record<string, string> = {};
+
+    if (biometricChallengeToken) {
+      headers[
+        "X-Biometric-Challenge-Token"
+      ] = biometricChallengeToken;
+    }
+
+    const data = await apiFetch<any>(
+      `/api/v1/auth/biometric-challenges/${encodeURIComponent(
+        challengeId,
+      )}`,
+      {
+        headers,
+      },
+    );
+
+    // JWTs are stored ONLY after fingerprint verification.
+    if (
+      data.accessToken &&
+      data.refreshToken
+    ) {
+      tokenStore.set(
+        data.accessToken,
+        data.refreshToken,
+      );
+
+      clearBiometricChallengeToken();
+    }
+
+    return data;
+  },
 
   logout() {
     tokenStore.clear();
+    clearBiometricChallengeToken();
+
     window.location.href = "/login";
   },
 
-  me: () => apiFetch<{ _id: string; email: string; name: string; role: "admin" | "manager" | "officer" | "analyst" }>("/api/v1/auth/me"),
+  me: () =>
+    apiFetch<{
+      _id: string;
+      email: string;
+      name: string;
+      role:
+        | "admin"
+        | "manager"
+        | "officer"
+        | "analyst";
+    }>(
+      "/api/v1/auth/me",
+    ),
 };
 
-// ── Transaction API ───────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Transaction API
+// ─────────────────────────────────────────────────────────────────────────────
+
 export const transactionApi = {
-  list:      (limit = 50, skip = 0) => apiFetch<any[]>(`/api/v1/transactions/?limit=${limit}&skip=${skip}`),
-  get:       (id: string)           => apiFetch<any>(`/api/v1/transactions/${id}`),
-  byAccount: (accountId: string)    => apiFetch<any[]>(`/api/v1/transactions/account/${accountId}`),
-  stats:     ()                     => apiFetch<any>("/api/v1/transactions/stats"),
-  create:    (txn: object)          => apiFetch<any>("/api/v1/transactions/", { method: "POST", body: JSON.stringify(txn) }),
+  list: (
+    limit = 50,
+    skip = 0,
+  ) =>
+    apiFetch<any[]>(
+      `/api/v1/transactions/?limit=${limit}&skip=${skip}`,
+    ),
+
+  get: (id: string) =>
+    apiFetch<any>(
+      `/api/v1/transactions/${id}`,
+    ),
+
+  byAccount: (
+    accountId: string,
+  ) =>
+    apiFetch<any[]>(
+      `/api/v1/transactions/account/${accountId}`,
+    ),
+
+  stats: () =>
+    apiFetch<any>(
+      "/api/v1/transactions/stats",
+    ),
+
+  create: (txn: object) =>
+    apiFetch<any>(
+      "/api/v1/transactions/",
+      {
+        method: "POST",
+        body: JSON.stringify(txn),
+      },
+    ),
 };
 
-// ── Case API ──────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Case API
+// ─────────────────────────────────────────────────────────────────────────────
+
 export const caseApi = {
-  list: (params?: { status?: string; priority?: string; limit?: number }) => {
-    const q = new URLSearchParams(
-      Object.fromEntries(Object.entries(params ?? {}).filter(([, v]) => v !== undefined)) as any
+  list: (
+    params?: {
+      status?: string;
+      priority?: string;
+      limit?: number;
+    },
+  ) => {
+    const query = new URLSearchParams(
+      Object.fromEntries(
+        Object.entries(
+          params ?? {},
+        ).filter(
+          ([, value]) =>
+            value !== undefined,
+        ),
+      ) as any,
     ).toString();
-    return apiFetch<any[]>(`/api/v1/cases/?${q}`);
+
+    return apiFetch<any[]>(
+      `/api/v1/cases/?${query}`,
+    );
   },
-  get:          (id: string)                             => apiFetch<any>(`/api/v1/cases/${id}`),
-  summary:      ()                                       => apiFetch<any>("/api/v1/cases/summary"),
-  updateStatus: (id: string, status: string, notes = "") =>
-    apiFetch<any>(`/api/v1/cases/${id}/status`, {
-      method: "PATCH",
-      body: JSON.stringify({ status, analyst_notes: notes }),
-    }),
-  acceptRecommendation: (id: string) =>
-    apiFetch<any>(`/api/v1/cases/${id}/review/accept`, { method: "POST" }),
-  overrideRecommendation: (id: string, decision: string, reason: string) =>
-    apiFetch<any>(`/api/v1/cases/${id}/review/override`, {
-      method: "POST",
-      body: JSON.stringify({ decision, reason }),
-    }),
-  requestMoreEvidence: (id: string, request: string) =>
-    apiFetch<any>(`/api/v1/cases/${id}/review/more-evidence`, {
-      method: "POST",
-      body: JSON.stringify({ request }),
-    }),
-  assign: (id: string, officerId: string) =>
-    apiFetch<any>(`/api/v1/cases/${id}/assign`, {
-      method: "POST",
-      body: JSON.stringify({ officer_id: officerId }),
-    }),
-  markFalsePositive: (id: string, reason: string, notes = "") =>
-    apiFetch<any>(`/api/v1/cases/${id}/false-positive`, {
-      method: "POST",
-      body: JSON.stringify({ reason, notes }),
-    }),
+
+  get: (id: string) =>
+    apiFetch<any>(
+      `/api/v1/cases/${id}`,
+    ),
+
+  summary: () =>
+    apiFetch<any>(
+      "/api/v1/cases/summary",
+    ),
+
+  updateStatus: (
+    id: string,
+    status: string,
+    notes = "",
+  ) =>
+    apiFetch<any>(
+      `/api/v1/cases/${id}/status`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          status,
+          analyst_notes: notes,
+        }),
+      },
+    ),
+
+  acceptRecommendation: (
+    id: string,
+  ) =>
+    apiFetch<any>(
+      `/api/v1/cases/${id}/review/accept`,
+      {
+        method: "POST",
+      },
+    ),
+
+  overrideRecommendation: (
+    id: string,
+    decision: string,
+    reason: string,
+  ) =>
+    apiFetch<any>(
+      `/api/v1/cases/${id}/review/override`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          decision,
+          reason,
+        }),
+      },
+    ),
+
+  requestMoreEvidence: (
+    id: string,
+    request: string,
+  ) =>
+    apiFetch<any>(
+      `/api/v1/cases/${id}/review/more-evidence`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          request,
+        }),
+      },
+    ),
+
+  assign: (
+    id: string,
+    officerId: string,
+  ) =>
+    apiFetch<any>(
+      `/api/v1/cases/${id}/assign`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          officer_id: officerId,
+        }),
+      },
+    ),
+
+  markFalsePositive: (
+    id: string,
+    reason: string,
+    notes = "",
+  ) =>
+    apiFetch<any>(
+      `/api/v1/cases/${id}/false-positive`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          reason,
+          notes,
+        }),
+      },
+    ),
+
   falsePositiveStats: () =>
-    apiFetch<any>("/api/v1/cases/false-positive-stats"),
-  audit: (id: string, limit = 100) =>
-    apiFetch<any[]>(`/api/v1/cases/${id}/audit?limit=${limit}`),
-  startStrDownloadChallenge: (id: string) =>
-    apiFetch<any>(`/api/v1/cases/${id}/str/download-challenge`, { method: "POST" }),
-  checkStrDownloadChallenge: (caseId: string, challengeId: string) =>
-    apiFetch<any>(`/api/v1/cases/${caseId}/str/download-challenge/${encodeURIComponent(challengeId)}`),
-  async downloadStr(caseId: string, challengeId: string) {
-    const response = await fetch(`${BASE_URL}/api/v1/cases/${caseId}/str/download?challenge_id=${encodeURIComponent(challengeId)}`, {
-      headers: tokenStore.access ? { Authorization: `Bearer ${tokenStore.access}` } : {},
-    });
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: response.statusText }));
-      throw new Error(error.detail ?? "STR download failed");
-    }
-    const blob = await response.blob();
-    const disposition = response.headers.get("Content-Disposition") ?? "";
-    const filename = disposition.match(/filename="?([^";]+)"?/)?.[1] ?? `STR_${caseId}.txt`;
-    return { blob, filename };
-  },
+    apiFetch<any>(
+      "/api/v1/cases/false-positive-stats",
+    ),
+
+  audit: (
+    id: string,
+    limit = 100,
+  ) =>
+    apiFetch<any[]>(
+      `/api/v1/cases/${id}/audit?limit=${limit}`,
+    ),
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // STR biometric authorization
+  // ─────────────────────────────────────────────────────────────────────────
+
+  beginStrBiometricChallenge: (
+    caseId: string,
+  ) =>
+    apiFetch<any>(
+      `/api/v1/cases/${caseId}/str/biometric-challenge`,
+      {
+        method: "POST",
+      },
+    ),
+
+  checkStrBiometricChallenge: (
+    caseId: string,
+    challengeId: string,
+  ) =>
+    apiFetch<any>(
+      `/api/v1/cases/${caseId}/str/biometric-challenge/${encodeURIComponent(
+        challengeId,
+      )}`,
+    ),
 };
 
-// ── Users API (Phase 8 — case assignment) ──────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Users API
+// ─────────────────────────────────────────────────────────────────────────────
+
 export const userApi = {
-  listOfficers: () => apiFetch<any[]>("/api/v1/users/officers"),
+  listOfficers: () =>
+    apiFetch<any[]>(
+      "/api/v1/users/officers",
+    ),
 };
 
-// ── Analytics API ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Analytics API
+// ─────────────────────────────────────────────────────────────────────────────
+
 export const analyticsApi = {
-  dashboard: () => apiFetch<any>("/api/v1/analytics/dashboard"),
-  trend:     (days = 30) => apiFetch<any[]>(`/api/v1/analytics/trend?days=${days}`),
+  dashboard: () =>
+    apiFetch<any>(
+      "/api/v1/analytics/dashboard",
+    ),
+
+  trend: (days = 30) =>
+    apiFetch<any[]>(
+      `/api/v1/analytics/trend?days=${days}`,
+    ),
 };
 
-// ── Predictions API ───────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Predictions API
+// ─────────────────────────────────────────────────────────────────────────────
+
 export const predictionsApi = {
-  score:     (txn: object)   => apiFetch<any>("/api/v1/predictions/score", { method: "POST", body: JSON.stringify(txn) }),
-  modelInfo: ()               => apiFetch<any>("/api/v1/predictions/model-info"),
+  score: (txn: object) =>
+    apiFetch<any>(
+      "/api/v1/predictions/score",
+      {
+        method: "POST",
+        body: JSON.stringify(txn),
+      },
+    ),
+
+  modelInfo: () =>
+    apiFetch<any>(
+      "/api/v1/predictions/model-info",
+    ),
 };
