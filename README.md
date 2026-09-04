@@ -1,148 +1,244 @@
-# FinGuard AI — Full-Stack Fraud Detection System (v2.1 — Fixed)
+# FinGuard AI
 
-> PMLA 2002 / FIU-IND compliant · FastAPI + MongoDB + React + JWT Auth
+### AI-Assisted Financial Crime Detection & Investigation Platform
 
----
+FinGuard AI is a full-stack platform for detecting suspicious financial activity and supporting compliance investigations using **behavioral machine learning, multi-agent investigation, transaction-network analysis, and human-in-the-loop decision support**.
 
-## Bug Fixes in This Version (v2.1)
-
-All of the following were broken in v2.0 and are now fixed:
-
-| # | Bug | Fix |
-|---|-----|-----|
-| 1 | **"Investigate" showed 0 for everything** | `api.ts` now deep-normalises all API responses: snake_case keys → camelCase AND ISO date strings → Date objects automatically |
-| 2 | **CaseDetail crashed on open** | `caseData.detectedAt.toLocaleDateString()` called on a raw string — added `safeDate()` helper that handles both strings and Date objects |
-| 3 | **Evidence scores always showed 0** | Backend stores scores as `0.0–1.0` floats; frontend was displaying them as-is. Now multiplied ×100 for display |
-| 4 | **TransactionTimeline crashed** | `tx.timestamp.getTime()` called on ISO strings — replaced with `safeDate(tx.timestamp).getTime()` |
-| 5 | **FATF typologies / network / evidence missing** | All field access now handles both camelCase (after normalisation) and snake_case fallbacks |
-| 6 | **CaseQueue broke on API data** | Removed typed `Case` import; now uses `any[]` with safe fallbacks for all fields |
-| 7 | **STRReport had broken JSX** | Full rewrite — safe access for `caseData.id ?? caseData._id`, priority, riskScore |
-| 8 | **Analytics page used mock data** | Full rewrite using `useCases`, `useDashboardStats`, `useTrend` hooks with live data |
-| 9 | **`/case/:id` returned 404 for UUID case IDs** | `case_repo.get_by_id()` now searches by the UUID `id` field first, then falls back to MongoDB `_id` |
-| 10 | **Dashboard stats showed 0** | `analytics.py` now returns `averageRiskScore` and `suspiciousAccountsIdentified` fields |
-| 11 | **No cases on fresh install** | `seed.py` now scores all transactions and auto-creates fraud investigation cases |
-| 12 | **NetworkGraph crashed on empty data** | Added null guards for all array fields; handles zero connected accounts gracefully |
+FinGuard AI provides investigation and decision support. Final compliance decisions remain with authorized human investigators.
 
 ---
 
-## Quick Start (Docker — recommended)
+## ✨ Features
 
-```bash
-docker-compose up --build
+* **Behavioral Fraud Detection** using XGBoost + Isolation Forest
+* **Adaptive Multi-Agent Investigation** with six specialized agents
+* **Evidence Gathering** including transaction patterns, watchlist and PEP signals
+* **Transaction Network Analysis** for connected-account investigation
+* **Regulatory Assessment & STR Drafting**
+* **AI-Assisted Decision Synthesis** with actionable recommendations
+* **Case Management** with role-based access
+* **Human Review & Recommendation Override**
+* **False-Positive Feedback**
+* **Audit Trail** for investigation actions
+* **Analytics Dashboard**
+* **Fingerprint Authentication**
 
-# First time only — seeds users + 500 transactions + fraud cases
-docker-compose exec api python seed.py
+---
 
-# Open http://localhost:5173
-# Login: admin@finguard.ai / Admin@1234
+## 🧠 Investigation Pipeline
+
+```text
+Transaction
+     ↓
+Behavioral ML Detection
+     ↓
+Adaptive Investigation Planner
+     ↓
+┌─────────────────────────────────┐
+│ Agent 1 — Anomaly Detection     │
+│ Agent 2 — Evidence Gathering    │
+│ Agent 3 — Network Investigation │
+│ Agent 4 — Regulatory Assessment │
+│ Agent 5 — Explanation / STR     │
+│ Agent 6 — Decision Synthesis    │
+└─────────────────────────────────┘
+     ↓
+Investigation Case
+     ↓
+Human Investigator Review
+     ↓
+Final Action
 ```
 
----
-
-## Manual Setup
-
-### Backend
-```bash
-cd backend
-python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-cp .env.example .env        # edit MONGODB_URL and SECRET_KEY
-python seed.py              # requires MongoDB running
-uvicorn app.main:app --reload --port 8000
-# Swagger docs → http://localhost:8000/docs
-```
-
-### Frontend
-```bash
-# from project root
-echo "VITE_API_URL=http://localhost:8000" > .env.local
-npm install && npm run dev
-# → http://localhost:5173
-```
+The planner can conditionally route investigations based on the available evidence instead of executing every investigation stage for every transaction.
 
 ---
 
-## Default Credentials (after seed.py)
+## 🤖 Machine Learning
 
-| Role    | Email                   | Password     |
-|---------|-------------------------|--------------|
-| Admin   | admin@finguard.ai       | Admin@1234   |
-| Analyst | analyst@finguard.ai     | Analyst@1234 |
+FinGuard AI currently uses an ensemble of:
 
-> Change these in production.
+* **XGBoost** for behavioral classification
+* **Isolation Forest** for anomaly detection
+
+The model incorporates transaction and behavioral features such as:
+
+* Transaction amount and type
+* Transaction frequency
+* Time-of-day behavior
+* Historical transaction patterns
+* Amount-to-history ratios
+* Time since previous activity
 
 ---
 
-## Project Structure
+## 🛠️ Tech Stack
 
-```
-finguard_fixed/
+**Frontend**
+
+React · TypeScript · Vite · Material UI · Tailwind CSS · Recharts
+
+**Backend**
+
+Python · FastAPI · Uvicorn · Pydantic · JWT · bcrypt
+
+**Data & ML**
+
+MongoDB  · XGBoost · scikit-learn · Joblib · NumPy
+
+**Hardware**
+
+Arduino Uno ·  Fingerprint Sensor · Serial Communication
+
+---
+
+## 📁 Project Structure
+
+```text
+FinGuard-AI/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py                    FastAPI app + lifespan
-│   │   ├── core/
-│   │   │   ├── config.py              Env-driven settings
-│   │   │   ├── security.py            JWT + bcrypt
-│   │   │   └── logging.py             Prediction audit logger
-│   │   ├── db/
-│   │   │   ├── session.py             Async MongoDB + indexes
-│   │   │   └── repositories/
-│   │   │       ├── transaction_repo.py
-│   │   │       ├── case_repo.py       ← Fixed: UUID id lookup
-│   │   │       └── user_repo.py
 │   │   ├── api/routes/
-│   │   │   ├── auth.py
-│   │   │   ├── transactions.py
-│   │   │   ├── cases.py
-│   │   │   ├── predictions.py
-│   │   │   └── analytics.py           ← Fixed: all dashboard fields present
+│   │   ├── core/
+│   │   ├── db/
 │   │   ├── services/
-│   │   │   ├── fraud_prediction.py    ML service
-│   │   │   └── case_service.py
 │   │   └── workers/
-│   │       └── background.py          ← Fixed: account_id handling
-│   ├── seed.py                        ← Fixed: creates cases, not just txns
-│   ├── requirements.txt
-│   ├── Dockerfile
-│   └── .env.example
+│   ├── models/
+│   ├── seed.py
+│   └── requirements.txt
 │
-├── src/app/
-│   ├── services/
-│   │   └── api.ts                     ← Fixed: snake→camel + string→Date normalization
-│   ├── hooks/useApi.ts                ← Fixed: safe empty-id guard
-│   ├── context/AuthContext.tsx
-│   ├── pages/
-│   │   ├── Dashboard.tsx              Live API hooks
-│   │   ├── CaseDetail.tsx             ← Fixed: all crashes, safe field access
-│   │   ├── Analytics.tsx              ← Fixed: live data, no mock imports
-│   │   └── LoginPage.tsx
-│   └── components/
-│       ├── dashboard/CaseQueue.tsx    ← Fixed: any[] type, safe field access
-│       └── case/
-│           ├── TransactionTimeline.tsx ← Fixed: safe Date handling
-│           ├── EvidencePanel.tsx       ← Fixed: 0-1 → 0-100 score display
-│           ├── NetworkGraph.tsx        ← Fixed: empty data guards
-│           └── STRReport.tsx           ← Fixed: full rewrite, no broken JSX
+├── src/
+│   └── app/
+│       ├── components/
+│       ├── context/
+│       ├── hooks/
+│       ├── pages/
+│       └── services/
+│
+├── arduino/
+│   └── finguard_biometric.ino
 │
 ├── docker-compose.yml
 ├── render.yaml
-└── vercel.json
+├── vercel.json
+└── README.md
 ```
 
 ---
 
-## Deploy to Production
+## 🚀 Getting Started
 
-### Backend → Render.com
-1. Push to GitHub → Render detects `render.yaml` automatically  
-2. Set `MONGODB_URL` in Render dashboard (MongoDB Atlas free tier)  
-3. Set `SECRET_KEY` to a random 32-char string  
+### Docker — Recommended
 
-### Frontend → Vercel
-1. Import repo on Vercel  
-2. Add env var: `VITE_API_URL=https://finguard-api.onrender.com`  
-3. Deploy  
+Make sure Docker is installed, then run:
 
-### MongoDB → Atlas (free M0)
-1. Create cluster at mongodb.com/atlas  
-2. Get connection string → paste as `MONGODB_URL` on Render  
+```bash
+docker-compose up --build
+```
+
+The application will be available at:
+
+```text
+Frontend → http://localhost:5173
+Backend  → http://localhost:8000
+API Docs → http://localhost:8000/docs
+```
+
+### Seed Demo Data
+
+```bash
+docker-compose exec api python seed.py
+```
+
+This creates demo users and sample transactions for local testing.
+
+---
+
+## ⚙️ Manual Setup
+
+### Backend
+
+```bash
+cd backend
+
+python -m venv venv
+```
+
+Windows:
+
+```bash
+venv\Scripts\activate
+```
+
+macOS/Linux:
+
+```bash
+source venv/bin/activate
+```
+
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Create `.env` from `.env.example`, configure MongoDB and `SECRET_KEY`, then run:
+
+```bash
+uvicorn app.main:app --reload --port 8000
+```
+
+### Frontend
+
+From the project root:
+
+```bash
+npm install
+```
+
+Create `.env.local`:
+
+```env
+VITE_API_URL=http://localhost:8000
+```
+
+Run:
+
+```bash
+npm run dev
+```
+
+---
+
+## 🔐 Security & Access Control
+
+FinGuard AI includes:
+
+* JWT authentication
+* Password hashing
+* Role-based authorization
+* Role-aware case access
+* Protected investigator actions
+* Case audit logging
+* Administrator-controlled biometric enrollment
+
+Supported application roles include **Admin, Manager, Officer, and Analyst**.
+
+---
+
+## 📊 Case Decisions
+
+The decision-support layer can produce operational recommendations such as:
+
+```text
+BLOCK
+MONITOR
+ESCALATE
+FILE_STR
+REQUEST_INFO
+CLOSE
+```
+
+These recommendations combine investigation evidence and risk signals. They are intended to support investigators and **do not constitute autonomous legal or regulatory decisions**.
+
+##
