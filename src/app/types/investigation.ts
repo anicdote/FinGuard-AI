@@ -125,6 +125,23 @@ export interface Recommendation {
   reasoning?: string;
   regulatoryBasis?: string;
   timestamp?: string | Date;
+  decision?: string;
+  decisionCategory?: string;
+  priority?: string;
+  operationalRiskScore?: number;
+  networkRiskScore?: number;
+  decisionFactors?: Record<string, any>;
+  supportingEvidence?: Record<string, any>;
+  regulatoryAssessment?: Record<string, any>;
+  strAssessment?: Record<string, any>;
+  strStatus?: string;
+  strFilingStatus?: string;
+  agent5Explanation?: string;
+  agent5StrDraft?: string;
+  missingInformation?: string[];
+  requiresHumanReview?: boolean;
+  caseAction?: string;
+  decisionBasis?: string;
 }
 
 // ── Planner / agent trace ───────────────────────────────────────────────────
@@ -201,6 +218,14 @@ export interface CaseData {
   watchlistHits?: WatchlistHit[];
   regulatory?: RegulatoryFindings;
   confidenceScores?: ConfidenceScores;
+
+  decision?: string;
+  decisionCategory?: string;
+  caseAction?: string;
+  requiresHumanReview?: boolean;
+  missingInformation?: string[];
+  strStatus?: string;
+  strFilingStatus?: string;
 
   detectedAt?: string | Date;
   createdAt?: string | Date;

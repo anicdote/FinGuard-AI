@@ -24,6 +24,17 @@ def _actor(user: dict) -> dict:
     }
 
 
+def _get_recommendation_action(recommendation):
+    """Return Agent 6's operational action while supporting legacy cases."""
+    if not isinstance(recommendation, dict):
+        return recommendation
+    return (
+        recommendation.get("case_action")
+        or recommendation.get("decision")
+        or recommendation.get("action")
+    )
+
+
 async def _audit(
     db,
     case_id: str,
@@ -260,7 +271,7 @@ async def accept_recommendation(
         raise HTTPException(status_code=404, detail="Case not found")
 
     recommendation = case.get("recommendation") or case.get("investigation", {}).get("recommendation", {})
-    action = recommendation.get("action") if isinstance(recommendation, dict) else recommendation
+    action = _get_recommendation_action(recommendation)
     if not action:
         raise HTTPException(status_code=400, detail="No AI recommendation exists for this case")
 
@@ -309,7 +320,7 @@ async def override_recommendation(
         raise HTTPException(status_code=404, detail="Case not found")
 
     recommendation = case.get("recommendation") or case.get("investigation", {}).get("recommendation", {})
-    previous = recommendation.get("action") if isinstance(recommendation, dict) else recommendation
+    previous = _get_recommendation_action(recommendation)
     if not previous:
         raise HTTPException(status_code=400, detail="No AI recommendation exists for this case")
 
@@ -358,7 +369,7 @@ async def request_more_evidence(
         raise HTTPException(status_code=404, detail="Case not found")
 
     recommendation = case.get("recommendation") or case.get("investigation", {}).get("recommendation", {})
-    previous = recommendation.get("action") if isinstance(recommendation, dict) else recommendation
+    previous = _get_recommendation_action(recommendation)
     review = {
         "status": "more_evidence_requested",
         "action": "request_more_evidence",
@@ -393,6 +404,7 @@ async def request_more_evidence(
         "more_evidence_requested",
         current_user,
         {
+            "previous_recommendation": previous,
             "request": body.request.strip(),
             "transactions_reopened": transactions_reopened,
         },

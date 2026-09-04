@@ -34,13 +34,30 @@ export function RecommendationPanel({
   riskScore,
   disagreementFlag,
 }: RecommendationPanelProps) {
-  const action        = recommendation?.action;
+  const action        = recommendation?.caseAction ?? recommendation?.decision ?? recommendation?.action;
   const cfg            = (action && ACTION_CONFIG[action]) ?? null;
   const Icon           = cfg?.icon ?? Eye;
   const confidencePct  = recommendation?.confidencePct ?? (recommendation?.confidence ? recommendation.confidence * 100 : undefined);
   const riskLevel      = anomalyScores?.riskLevel ?? "";
   const probability    = anomalyScores?.probability;
   const riskColor      = RISK_LEVEL_CONFIG[riskLevel]?.color ?? "#1A3A6B";
+  const formatLabel = (value: string) => value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+  const formatPercent = (value: number) => `${(value <= 1 ? value * 100 : value).toFixed(0)}%`;
+  const structuredFields = [
+    ["Decision", recommendation?.decision],
+    ["Decision Category", recommendation?.decisionCategory],
+    ["Priority", recommendation?.priority],
+    ["Operational Risk Score", typeof recommendation?.operationalRiskScore === "number" ? formatPercent(recommendation.operationalRiskScore) : undefined],
+    ["Network Risk Score", typeof recommendation?.networkRiskScore === "number" ? formatPercent(recommendation.networkRiskScore) : undefined],
+    ["Human Review Required", typeof recommendation?.requiresHumanReview === "boolean" ? (recommendation.requiresHumanReview ? "Yes" : "No") : undefined],
+    ["Case Action", recommendation?.caseAction],
+    ["STR Review Status", recommendation?.strStatus],
+    ["STR Filing Status", recommendation?.strFilingStatus],
+  ].filter(([, value]) => value !== undefined && value !== null && value !== "") as [string, string][];
+  const compactEntries = (value: Record<string, any> | undefined) =>
+    Object.entries(value ?? {}).filter(([, entry]) => entry !== undefined && entry !== null && entry !== "").slice(0, 4);
+  const decisionFactors = compactEntries(recommendation?.decisionFactors);
+  const supportingEvidence = compactEntries(recommendation?.supportingEvidence);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
@@ -104,6 +121,39 @@ export function RecommendationPanel({
                 <p className="text-xs text-slate-500 mt-2 border-t border-slate-100 pt-2">
                   <span className="font-semibold">Regulatory basis:</span> {recommendation.regulatoryBasis}
                 </p>
+              )}
+              {structuredFields.length > 0 && (
+                <div className="mt-4 border-t border-slate-100 pt-3">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Agent 6 Decision Details</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">
+                    {structuredFields.map(([label, value]) => (
+                      <p key={label} className="text-xs text-slate-600">
+                        <span className="font-semibold text-slate-700">{label}:</span> {formatLabel(value)}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {(decisionFactors.length > 0 || supportingEvidence.length > 0) && (
+                <div className="mt-3 grid grid-cols-1 gap-2 text-xs">
+                  {decisionFactors.length > 0 && (
+                    <div className="rounded bg-slate-50 p-2.5 text-slate-600">
+                      <span className="font-semibold text-slate-700">Decision factors:</span>{" "}
+                      {decisionFactors.map(([key, value]) => `${formatLabel(key)}: ${typeof value === "object" ? JSON.stringify(value) : String(value)}`).join(" · ")}
+                    </div>
+                  )}
+                  {supportingEvidence.length > 0 && (
+                    <div className="rounded bg-slate-50 p-2.5 text-slate-600">
+                      <span className="font-semibold text-slate-700">Supporting evidence:</span>{" "}
+                      {supportingEvidence.map(([key, value]) => `${formatLabel(key)}: ${typeof value === "object" ? JSON.stringify(value) : String(value)}`).join(" · ")}
+                    </div>
+                  )}
+                </div>
+              )}
+              {recommendation?.missingInformation && recommendation.missingInformation.length > 0 && (
+                <div className="mt-3 rounded border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800">
+                  <span className="font-semibold">Missing information:</span> {recommendation.missingInformation.join(" · ")}
+                </div>
               )}
             </>
           )}

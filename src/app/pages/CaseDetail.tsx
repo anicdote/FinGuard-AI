@@ -19,7 +19,7 @@ import { RegulatoryPanel } from "../components/case/RegulatoryPanel";
 import { AgentTracePanel } from "../components/case/AgentTracePanel";
 import { SubCasesPanel } from "../components/case/SubCasesPanel";
 import { AuditTrailPanel } from "../components/case/AuditTrailPanel";
-import type { CaseData } from "../types/investigation";
+import type { CaseData, Recommendation } from "../types/investigation";
 
 // Safe date helper — works whether value is a Date object or an ISO string
 function safeDate(val: any): Date {
@@ -106,7 +106,20 @@ export function CaseDetail() {
   //    top level of the case document, so we read them directly rather than
   //    diving into `investigation` (kept as a fallback for older cases). ──
   const investigation = c.investigation ?? {};
-  const recommendation = c.recommendation ?? investigation.recommendation ?? {};
+  // The full Agent 6 recommendation is authoritative. CaseService also mirrors
+  // selected fields at the case level, which remain a fallback for older data.
+  const storedRecommendation = c.recommendation ?? investigation.recommendation ?? {};
+  const recommendation: Recommendation = {
+    ...storedRecommendation,
+    decision: storedRecommendation.decision ?? c.decision,
+    decisionCategory: storedRecommendation.decisionCategory ?? c.decisionCategory,
+    caseAction: storedRecommendation.caseAction ?? c.caseAction,
+    requiresHumanReview: storedRecommendation.requiresHumanReview ?? c.requiresHumanReview,
+    missingInformation: storedRecommendation.missingInformation ?? c.missingInformation,
+    strStatus: storedRecommendation.strStatus ?? c.strStatus,
+    strFilingStatus: storedRecommendation.strFilingStatus ?? c.strFilingStatus,
+  };
+  const recommendationAction = recommendation.caseAction ?? recommendation.decision ?? recommendation.action;
   const explanation    = c.explanation    ?? investigation.explanation    ?? "";
   const shapValues      = c.shapValues      ?? investigation.shapValues      ?? [];
   const agentLog         = c.agentLog         ?? investigation.agentLog         ?? [];
@@ -444,7 +457,7 @@ export function CaseDetail() {
               {reviewMode === "override" ? "Override AI Recommendation" : "Request More Evidence"}
             </h2>
             <p className="text-sm text-slate-500 mb-5">
-              AI recommendation: <b>{recommendation.action ?? "—"}</b>
+              AI recommendation: <b>{recommendationAction ?? "—"}</b>
             </p>
             {reviewMode === "override" && (
               <label className="block mb-4">
