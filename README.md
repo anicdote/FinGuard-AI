@@ -115,7 +115,7 @@ A physical second factor is required before login completes and before an STR is
 1. Arduino Uno communicates with the backend over USB serial.
 2. The fingerprint sensor performs local matching (no raw biometric data leaves the device).
 3. The 16×2 I²C LCD shows live verification status (`Finger Required` → `Verifying` → result).
-4. A buzzer and NeoPixel give real-time pass/fail feedback.
+4. A buzzer gives the real-time pass/fail feedback.
 5. On success, the backend completes JWT session creation or unlocks STR filing.
 
 ---
