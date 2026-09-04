@@ -162,6 +162,7 @@ class Agent6Recommend:
             "decision_category": category,
             "priority": priority,
             "operational_risk_score": operational_score,
+            "network_risk_score": network_risk,
             "decision_factors": factors,
             "supporting_evidence": self._supporting_evidence(ctx),
             "regulatory_assessment": self._regulatory_snapshot(regulatory),
@@ -244,10 +245,8 @@ class Agent6Recommend:
             return "MONITOR", "MONITORING"
 
         if (
-            self._at_least(fraud, .20)
-            or (evidence is not None and evidence < .50)
+            (evidence is not None and evidence < .50)
             or str_review
-            or bool(missing)
         ):
             return "REQUEST_INFO", "INFORMATION_REVIEW"
 
@@ -428,7 +427,8 @@ class Agent6Recommend:
         return self._dedupe(result)
 
     def _supporting_evidence(self, ctx: InvestigationContext) -> List[Any]:
-        regulatory_evidence = self._list(ctx.regulatory.get("supporting_evidence"))
+        regulatory = self._dict(ctx.regulatory)
+        regulatory_evidence = self._list(regulatory.get("supporting_evidence"))
         if regulatory_evidence:
             return regulatory_evidence
         result: List[Any] = []
