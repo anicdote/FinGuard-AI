@@ -1,27 +1,119 @@
-# FinGuard AI — Full-Stack Fraud Detection System (v2.1 — Fixed)
+# FinGuard AI — Real-Time AML Compliance & Fraud Detection Platform
 
-> PMLA 2002 / FIU-IND compliant · FastAPI + MongoDB + React + JWT Auth
+> **AI-assisted financial fraud detection and AML investigation platform** that turns a suspicious transaction into an evidence-backed, regulator-ready investigation — automatically.
+
+[![Built at Smart Horizon 2026](https://img.shields.io/badge/Hackathon-Smart%20Horizon%202026-blueviolet)](#hackathon)
+[![PMLA 2002](https://img.shields.io/badge/Compliance-PMLA%202002%20%2F%20FIU--IND-critical)](#solution-overview---the-six-agent-investigation-pipeline)
+[![Python](https://img.shields.io/badge/Backend-FastAPI%20%2B%20Python-009688)](#tech-stack)
+[![React](https://img.shields.io/badge/Frontend-React%20%2B%20TypeScript-61DAFB)](#tech-stack)
+[![License](https://img.shields.io/badge/License-See%20ATTRIBUTIONS.md-lightgrey)](ATTRIBUTIONS.md)
 
 ---
 
-## Bug Fixes in This Version (v2.1)
+## Problem Statement
 
-All of the following were broken in v2.0 and are now fixed:
+Traditional fraud detection systems generate a single fraud probability score per transaction — but a score alone doesn't tell an investigator **why** a transaction is suspicious, **who else** is involved, or **what regulation** applies.
 
-| # | Bug | Fix |
-|---|-----|-----|
-| 1 | **"Investigate" showed 0 for everything** | `api.ts` now deep-normalises all API responses: snake_case keys → camelCase AND ISO date strings → Date objects automatically |
-| 2 | **CaseDetail crashed on open** | `caseData.detectedAt.toLocaleDateString()` called on a raw string — added `safeDate()` helper that handles both strings and Date objects |
-| 3 | **Evidence scores always showed 0** | Backend stores scores as `0.0–1.0` floats; frontend was displaying them as-is. Now multiplied ×100 for display |
-| 4 | **TransactionTimeline crashed** | `tx.timestamp.getTime()` called on ISO strings — replaced with `safeDate(tx.timestamp).getTime()` |
-| 5 | **FATF typologies / network / evidence missing** | All field access now handles both camelCase (after normalisation) and snake_case fallbacks |
-| 6 | **CaseQueue broke on API data** | Removed typed `Case` import; now uses `any[]` with safe fallbacks for all fields |
-| 7 | **STRReport had broken JSX** | Full rewrite — safe access for `caseData.id ?? caseData._id`, priority, riskScore |
-| 8 | **Analytics page used mock data** | Full rewrite using `useCases`, `useDashboardStats`, `useTrend` hooks with live data |
-| 9 | **`/case/:id` returned 404 for UUID case IDs** | `case_repo.get_by_id()` now searches by the UUID `id` field first, then falls back to MongoDB `_id` |
-| 10 | **Dashboard stats showed 0** | `analytics.py` now returns `averageRiskScore` and `suspiciousAccountsIdentified` fields |
-| 11 | **No cases on fresh install** | `seed.py` now scores all transactions and auto-creates fraud investigation cases |
-| 12 | **NetworkGraph crashed on empty data** | Added null guards for all array fields; handles zero connected accounts gracefully |
+- Money laundering typically spans multiple accounts and transactions, not just one.
+- Evidence (behavioural patterns, watchlists, PEP matches) is scattered across disconnected systems.
+- Mapping suspicious activity to **FATF typologies** and **PMLA sections** is still a manual, error-prone process.
+- Investigators need a **traceable, auditable** decision trail — not a black-box score.
+
+**FinGuard AI** solves this by wrapping fraud detection in a six-agent investigation pipeline that produces a complete, explainable, regulation-mapped case file — ready for compliance review and STR filing.
+
+---
+
+## Solution Overview — The Six-Agent Investigation Pipeline
+
+FinGuard AI uses an **adaptive multi-agent architecture** where a planner decides which agents actually need to run for a given transaction, instead of a single monolithic model:
+
+| Agent | Role |
+|---|---|
+| **1 — Anomaly Detection** | XGBoost + Isolation Forest ensemble generates a fraud probability with SHAP explanations |
+| **2 — Evidence Gathering** | Detects suspicious behavioural patterns, screens watchlists and PEP matches |
+| **3 — Network Investigation** | Analyses connected accounts and surfaces potential fraud networks |
+| **4 — Regulatory Risk Assessment** | Maps evidence to FATF-style typologies and applicable PMLA sections |
+| **5 — Explanation & STR Drafting** | Generates a human-readable explanation and a structured STR draft |
+| **6 — Recommended Action** | Combines all signals to recommend `BLOCK`, `FILE_STR`, `ESCALATE`, `MONITOR`, `REQUEST_INFO`, or `CLOSE` |
+
+### What makes it different
+
+- **Multi-agent, not monolithic** — six specialised agents instead of one fraud model
+- **Adaptive investigation** — agents run conditionally based on prior findings (e.g. low-risk transactions skip network analysis)
+- **Evidence-driven** — decisions are backed by behavioural evidence + watchlist/PEP data, not a single score
+- **Network-aware** — automatically identifies connected high-risk accounts and spins up linked sub-cases
+- **Explainable by design** — SHAP values show exactly which features pushed the fraud probability up or down
+- **Regulatory intelligence** — links every case to FATF typologies and PMLA sections automatically
+- **Hardware-backed security** — fingerprint verification required for login and STR submission
+- **Fully auditable** — every human decision, status change, and biometric attempt is logged
+
+---
+
+## Screenshots
+
+> Save the hackathon deck screenshots into `docs/screenshots/` using the filenames below (or update the paths) so they render here.
+
+### Overview — FATF Typology Mapping, Sub-Cases & SHAP Explanation
+![Overview tab — FATF typologies, escalated sub-cases, and SHAP explanation for a flagged transaction](docs/screenshots/overview-shap.png)
+
+### Evidence — Confidence Scoring, Suspicious Patterns & Watchlist Screening
+![Evidence tab — Agent 2 confidence score, risk boost, detected patterns, and watchlist/PEP screening](docs/screenshots/evidence-panel.png)
+
+### STR Report — Auto-Generated Suspicious Transaction Report
+![STR Report tab — auto-generated PMLA 2002 / FIU-IND aligned Suspicious Transaction Report](docs/screenshots/str-report.png)
+
+### Hardware — Biometric Second-Factor Verification Rig
+![Arduino Uno with fingerprint sensor, LCD, and buzzer used for biometric login and STR submission verification](docs/screenshots/hardware-setup.png)
+
+---
+
+## Technical Architecture
+
+![High-level system architecture diagram of FinGuard AI](docs/screenshots/architecture.png)
+
+```
+Transaction → Agent 1 (Anomaly Detection) → Adaptive Planner
+                                                   │
+        ┌──────────────────────────────────────────┼──────────────────────────────┐
+        ▼                                           ▼                              ▼
+  Agent 2 (Evidence)                    Agent 3 (Network)              Agent 4 (Regulatory)
+        └──────────────────────────────────────────┼──────────────────────────────┘
+                                                   ▼
+                                    Agent 5 (Explanation & STR Draft)
+                                                   ▼
+                                    Agent 6 (Recommended Action)
+                                                   ▼
+                                Case Dashboard · Audit Trail · STR Submission
+```
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| **Frontend** | React, TypeScript, Tailwind CSS, Vite |
+| **Backend** | FastAPI, Python, Uvicorn |
+| **Database** | MongoDB (async) |
+| **Machine Learning** | XGBoost (70%) + Isolation Forest (30%) ensemble, Scikit-learn, SHAP |
+| **AI Orchestration** | Custom six-agent pipeline with an Adaptive Planner |
+| **Authentication** | JWT + bcrypt, with fingerprint biometric as a second factor |
+| **Hardware** | Arduino Uno, fingerprint sensor, buzzer, NeoPixel, 16×2 I²C LCD |
+| **Deployment** | Docker, Render (backend), Vercel (frontend), MongoDB Atlas |
+
+**Dataset:** [PaySim](https://www.kaggle.com/datasets/ealaxi/paysim1) — a synthetic mobile-money transaction dataset (6.3M records used for training) with a binary `isFraud` label, a 70/30 stratified train-test split, and 10 engineered features (transaction amount, balance drain, CTR proximity, night activity, risky channel, balance ratio, etc.).
+
+---
+
+## Biometric Security Layer
+
+A physical second factor is required before login completes and before an STR is submitted:
+
+1. Arduino Uno communicates with the backend over USB serial.
+2. The fingerprint sensor performs local matching (no raw biometric data leaves the device).
+3. The 16×2 I²C LCD shows live verification status (`Finger Required` → `Verifying` → result).
+4. A buzzer and NeoPixel give real-time pass/fail feedback.
+5. On success, the backend completes JWT session creation or unlocks STR filing.
 
 ---
 
@@ -37,11 +129,10 @@ docker-compose exec api python seed.py
 # Login: admin@finguard.ai / Admin@1234
 ```
 
----
-
 ## Manual Setup
 
 ### Backend
+
 ```bash
 cd backend
 python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
@@ -53,6 +144,7 @@ uvicorn app.main:app --reload --port 8000
 ```
 
 ### Frontend
+
 ```bash
 # from project root
 echo "VITE_API_URL=http://localhost:8000" > .env.local
@@ -60,70 +152,48 @@ npm install && npm run dev
 # → http://localhost:5173
 ```
 
----
+### Arduino / Biometric Module (optional)
 
-## Default Credentials (after seed.py)
+```bash
+cd arduino
+# Flash the sketch to an Arduino Uno wired to the fingerprint sensor, buzzer, NeoPixel, and 16x2 I2C LCD
+# Set the correct serial port in the backend's .env before starting the API
+```
 
-| Role    | Email                   | Password     |
-|---------|-------------------------|--------------|
-| Admin   | admin@finguard.ai       | Admin@1234   |
-| Analyst | analyst@finguard.ai     | Analyst@1234 |
+### Default Credentials (after `seed.py`)
 
-> Change these in production.
+| Role | Email | Password |
+|---|---|---|
+| Admin | `admin@finguard.ai` | `Admin@1234` |
+| Analyst | `analyst@finguard.ai` | `Analyst@1234` |
+
+> Change these before any production or public deployment.
 
 ---
 
 ## Project Structure
 
 ```
-finguard_fixed/
+FinGuard-AI/
+├── arduino/                  Fingerprint / biometric second-factor sketch
 ├── backend/
 │   ├── app/
-│   │   ├── main.py                    FastAPI app + lifespan
-│   │   ├── core/
-│   │   │   ├── config.py              Env-driven settings
-│   │   │   ├── security.py            JWT + bcrypt
-│   │   │   └── logging.py             Prediction audit logger
-│   │   ├── db/
-│   │   │   ├── session.py             Async MongoDB + indexes
-│   │   │   └── repositories/
-│   │   │       ├── transaction_repo.py
-│   │   │       ├── case_repo.py       ← Fixed: UUID id lookup
-│   │   │       └── user_repo.py
-│   │   ├── api/routes/
-│   │   │   ├── auth.py
-│   │   │   ├── transactions.py
-│   │   │   ├── cases.py
-│   │   │   ├── predictions.py
-│   │   │   └── analytics.py           ← Fixed: all dashboard fields present
-│   │   ├── services/
-│   │   │   ├── fraud_prediction.py    ML service
-│   │   │   └── case_service.py
-│   │   └── workers/
-│   │       └── background.py          ← Fixed: account_id handling
-│   ├── seed.py                        ← Fixed: creates cases, not just txns
-│   ├── requirements.txt
-│   ├── Dockerfile
-│   └── .env.example
-│
-├── src/app/
-│   ├── services/
-│   │   └── api.ts                     ← Fixed: snake→camel + string→Date normalization
-│   ├── hooks/useApi.ts                ← Fixed: safe empty-id guard
-│   ├── context/AuthContext.tsx
-│   ├── pages/
-│   │   ├── Dashboard.tsx              Live API hooks
-│   │   ├── CaseDetail.tsx             ← Fixed: all crashes, safe field access
-│   │   ├── Analytics.tsx              ← Fixed: live data, no mock imports
-│   │   └── LoginPage.tsx
+│   │   ├── main.py           FastAPI app + lifespan
+│   │   ├── core/              Config, JWT/bcrypt security, audit logging
+│   │   ├── db/                 Async MongoDB session + repositories
+│   │   ├── api/routes/        auth, transactions, cases, predictions, analytics
+│   │   ├── services/           fraud_prediction.py (ML), case_service.py
+│   │   └── workers/           Background transaction-processing worker
+│   ├── seed.py                Seeds users, transactions, and fraud cases
+│   └── requirements.txt
+├── src/app/                  React + TypeScript frontend (Vite)
+│   ├── services/api.ts        Normalises API responses (camelCase + Date objects)
+│   ├── hooks/useApi.ts
+│   ├── pages/                 Dashboard, CaseDetail, Analytics, LoginPage
 │   └── components/
-│       ├── dashboard/CaseQueue.tsx    ← Fixed: any[] type, safe field access
-│       └── case/
-│           ├── TransactionTimeline.tsx ← Fixed: safe Date handling
-│           ├── EvidencePanel.tsx       ← Fixed: 0-1 → 0-100 score display
-│           ├── NetworkGraph.tsx        ← Fixed: empty data guards
-│           └── STRReport.tsx           ← Fixed: full rewrite, no broken JSX
-│
+│       ├── dashboard/CaseQueue.tsx
+│       └── case/               TransactionTimeline, EvidencePanel, NetworkGraph, STRReport
+├── guidelines/                Project/design guidelines
 ├── docker-compose.yml
 ├── render.yaml
 └── vercel.json
@@ -131,18 +201,38 @@ finguard_fixed/
 
 ---
 
-## Deploy to Production
+## Results
 
-### Backend → Render.com
-1. Push to GitHub → Render detects `render.yaml` automatically  
-2. Set `MONGODB_URL` in Render dashboard (MongoDB Atlas free tier)  
-3. Set `SECRET_KEY` to a random 32-char string  
+- XGBoost and Isolation Forest models trained and successfully loaded by the application.
+- End-to-end biometric login flow demonstrated: password → biometric challenge → fingerprint verification → JWT session.
+- Six-agent investigation pipeline executed successfully on seeded transactions, with the Adaptive Planner correctly skipping network analysis for low-risk transactions.
+- Example high-risk case: **8 connected nodes**, **4 auto-created sub-cases**, multiple FATF typologies identified, with recommended actions of `BLOCK` and `FILE_STR`.
 
-### Frontend → Vercel
-1. Import repo on Vercel  
-2. Add env var: `VITE_API_URL=https://finguard-api.onrender.com`  
-3. Deploy  
+---
 
-### MongoDB → Atlas (free M0)
-1. Create cluster at mongodb.com/atlas  
-2. Get connection string → paste as `MONGODB_URL` on Render  
+## Feasibility & Impact
+
+**Operational impact:** faster AML investigations, more consistent regulatory assessment, better evidence visibility for compliance officers, and improved security for high-risk regulatory actions.
+
+**Technical feasibility:** built entirely on established open-source technologies, a modular architecture that supports independent testing/extension, a Dockerized deployment, and an ML pipeline that runs without any paid third-party AI APIs.
+
+---
+
+## Future Enhancements
+
+- **Inter-Bank Fraud Intelligence Network** — shares anonymized fraud fingerprints and risk indicators across banks while preserving customer privacy.
+- **Fraud Intelligence Marketplace** — lets banks securely share and exchange verified fraud intelligence.
+- **Behavioral Fraud Fingerprinting (Fraud DNA)** — builds unique behavioural profiles to catch recurring fraud patterns.
+- **AI Case Merger** — automatically detects and merges related investigations to cut duplicate work.
+- **Regulatory Compliance Score** — AI checks whether an investigation is legally complete before an STR is filed.
+
+---
+
+## Hackathon
+
+Built for **Smart Horizon 2026 — 48-Hour International Hackathon**
+---
+
+## License & Attributions
+
+See [ATTRIBUTIONS.md](ATTRIBUTIONS.md) for third-party libraries, datasets, and credits.
