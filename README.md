@@ -14,7 +14,7 @@
 
 Traditional fraud detection systems generate a single fraud probability score per transaction — but a score alone doesn't tell an investigator **why** a transaction is suspicious, **who else** is involved, or **what regulation** applies.
 
-- Money laundering typically spans multiple accounts and transactions, not just one.
+- Money laundering typically spans across multiple accounts and transactions, not just one.
 - Evidence (behavioural patterns, watchlists, PEP matches) is scattered across disconnected systems.
 - Mapping suspicious activity to **FATF typologies** and **PMLA sections** is still a manual, error-prone process.
 - Investigators need a **traceable, auditable** decision trail — not a black-box score.
